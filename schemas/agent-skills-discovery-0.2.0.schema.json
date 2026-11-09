@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Transcribed from the Discovery Index section of https://github.com/cloudflare/agent-skills-discovery-rfc/blob/1bd1167983fa5ac9cd47987710c525308eda1a98/README.md (version 0.2.0, updated 2026-03-12). The schema URI it names did not resolve on 2026-11-09; see schemas/README.md.",
+  "title": "Agent Skills discovery index 0.2.0",
+  "type": "object",
+  "required": ["$schema", "skills"],
+  "properties": {
+    "$schema": {
+      "const": "https://schemas.agentskills.io/discovery/0.2.0/schema.json"
+    },
+    "skills": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/skill" }
+    }
+  },
+  "$defs": {
+    "skill": {
+      "type": "object",
+      "required": ["name", "type", "description", "url", "digest"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "type": {
+          "enum": ["skill-md", "archive"]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}
