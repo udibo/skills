@@ -42,7 +42,8 @@ export async function check(options: CheckOptions): Promise<string[]> {
   return problems;
 }
 
-async function compareBuilds(a: string, b: string, filesA: string[], filesB: string[]): Promise<string[]> {
+/** Compares two build outputs file by file; returns a message for each difference. */
+export async function compareBuilds(a: string, b: string, filesA: string[], filesB: string[]): Promise<string[]> {
   if (JSON.stringify(filesA) !== JSON.stringify(filesB)) return ["build is not deterministic: two runs wrote different file lists"];
   const problems: string[] = [];
   for (const file of filesA) {

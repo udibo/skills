@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
@@ -36,19 +37,26 @@ function integrity(bytes: Buffer): string {
 
 type Registry = AsyncDisposable & { url: string; requests: string[] };
 
-async function registry(routes: Record<string, Buffer>): Promise<Registry> {
+type Handler = (request: IncomingMessage, response: ServerResponse) => void;
+
+async function registry(routes: Record<string, Buffer | Handler>): Promise<Registry> {
   const requests: string[] = [];
   const server = createServer((request, response) => {
     requests.push(request.url ?? "");
-    const body = routes[request.url ?? ""];
-    response.writeHead(body ? 200 : 404).end(body);
+    const route = routes[request.url ?? ""];
+    if (typeof route === "function") route(request, response);
+    else response.writeHead(route ? 200 : 404).end(route);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}`,
     requests,
-    [Symbol.asyncDispose]: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    [Symbol.asyncDispose]: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
   };
 }
 
@@ -124,6 +132,55 @@ describe("fetchExternal", () => {
   });
 });
 
+describe("download limits", () => {
+  const pin = async (root: string): Promise<string> =>
+    pinFile(root, { name: SKILL, package: "@udibo/oauth2", version: "1.2.3", integrity: integrity(Buffer.from("x")) });
+  const route = "/@udibo/oauth2/-/oauth2-1.2.3.tgz";
+
+  test("refuses a response whose declared length exceeds the cap without reading it", async () => {
+    await using dir = await tempDir();
+    let written = 0;
+    await using server = await registry({
+      [route]: (_request, response) => {
+        response.writeHead(200, { "content-length": String(10_000) });
+        response.write(Buffer.alloc(100));
+        written += 100;
+      },
+    });
+    await expect(
+      fetchExternal({ externalFile: await pin(dir.path), cacheDir: path.join(dir.path, "cache"), registry: server.url, maxTarballBytes: 1024 }),
+    ).rejects.toThrow(`GET ${server.url}${route} returned more than 1024 bytes`);
+    expect(written).toBe(100);
+  });
+
+  test("aborts a streamed response once it passes the cap", async () => {
+    await using dir = await tempDir();
+    let chunks = 0;
+    await using server = await registry({
+      [route]: (_request, response) => {
+        response.writeHead(200);
+        const timer = setInterval(() => {
+          chunks++;
+          response.write(Buffer.alloc(512));
+        }, 1);
+        response.on("close", () => clearInterval(timer));
+      },
+    });
+    await expect(
+      fetchExternal({ externalFile: await pin(dir.path), cacheDir: path.join(dir.path, "cache"), registry: server.url, maxTarballBytes: 4096 }),
+    ).rejects.toThrow(`GET ${server.url}${route} returned more than 4096 bytes`);
+    expect(chunks).toBeLessThan(1000);
+  });
+
+  test("aborts a download slower than the timeout", async () => {
+    await using dir = await tempDir();
+    await using server = await registry({ [route]: () => undefined });
+    await expect(
+      fetchExternal({ externalFile: await pin(dir.path), cacheDir: path.join(dir.path, "cache"), registry: server.url, timeoutMs: 100 }),
+    ).rejects.toThrow(/aborted due to timeout/);
+  });
+});
+
 describe("external skills in the build", () => {
   async function fetched(root: string, version: string, skill: string): Promise<{ externalFile: string; cacheDir: string }> {
     const bytes = tarball({ [`package/skills/${SKILL}/SKILL.md`]: skill });
@@ -141,6 +198,42 @@ describe("external skills in the build", () => {
     expect(sources.issues).toEqual([
       { skill: SKILL, file: "external-skills.json", message: "not fetched at its pinned version; run node scripts/fetch-external.ts" },
     ]);
+  });
+
+  test("removes files a newer tarball no longer ships", async () => {
+    await using dir = await tempDir();
+    const cacheDir = path.join(dir.path, "cache");
+    const first = tarball({ [`package/skills/${SKILL}/SKILL.md`]: packageSkill("1.2.3"), [`package/skills/${SKILL}/references/old.md`]: "# Old\n" });
+    await using server1 = await registry({ "/@udibo/oauth2/-/oauth2-1.2.3.tgz": first });
+    const externalFile = await pinFile(dir.path, { name: SKILL, package: "@udibo/oauth2", version: "1.2.3", integrity: integrity(first) });
+    await fetchExternal({ externalFile, cacheDir, registry: server1.url });
+    await stat(path.join(cacheDir, SKILL, "references", "old.md"));
+    const second = tarball({ [`package/skills/${SKILL}/SKILL.md`]: packageSkill("1.2.4", "@udibo/oauth2@>=1.2.0 <1.3.0") });
+    await using server2 = await registry({ "/@udibo/oauth2/-/oauth2-1.2.4.tgz": second });
+    await pinFile(dir.path, { name: SKILL, package: "@udibo/oauth2", version: "1.2.4", integrity: integrity(second) });
+    await fetchExternal({ externalFile, cacheDir, registry: server2.url });
+    await expect(stat(path.join(cacheDir, SKILL, "references", "old.md"))).rejects.toThrow(/ENOENT/);
+  });
+
+  test("rejects a cache whose recorded integrity differs from the pin", async () => {
+    await using dir = await tempDir();
+    const { externalFile, cacheDir } = await fetched(dir.path, "1.2.3", packageSkill("1.2.3"));
+    const record = path.join(cacheDir, ".pins", `${SKILL}.json`);
+    const recorded = JSON.parse(await readFile(record, "utf8"));
+    await writeFile(record, JSON.stringify({ ...recorded, integrity: integrity(Buffer.from("other")) }));
+    const sources = await collectSources({ skillsDir: path.join(dir.path, "skills"), externalFile, externalCacheDir: cacheDir });
+    expect(sources.issues.map((issue) => issue.message)).toEqual(["not fetched at its pinned version; run node scripts/fetch-external.ts"]);
+  });
+
+  test("rejects a local skill and an external skill with the same name", async () => {
+    await using dir = await tempDir();
+    const { externalFile, cacheDir } = await fetched(dir.path, "1.2.3", packageSkill("1.2.3"));
+    const skillsDir = path.join(dir.path, "skills");
+    await mkdir(path.join(skillsDir, SKILL), { recursive: true });
+    await writeFile(path.join(skillsDir, SKILL, "SKILL.md"), packageSkill("1.2.3"));
+    const sources = await collectSources({ skillsDir, externalFile, externalCacheDir: cacheDir });
+    expect(sources.issues).toEqual([{ skill: SKILL, file: "SKILL.md", message: "two sources publish a skill with this name" }]);
+    expect(sources.skills).toEqual([]);
   });
 
   test("rejects a cache fetched at an older pin", async () => {

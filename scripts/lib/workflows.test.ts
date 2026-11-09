@@ -58,3 +58,40 @@ test.each([
 test("reports a workflow that is not valid YAML", () => {
   expect(checkWorkflow("w.yml", "on: [pull_request\n")[0]).toMatch(/^w\.yml: is not valid YAML/);
 });
+
+function withJobPermissions(permissions: string): string {
+  return workflow().replace("    runs-on: ubuntu-24.04", `    runs-on: ubuntu-24.04\n${permissions}`);
+}
+
+test.each([
+  ["write-all", "    permissions: write-all"],
+  ["contents and id-token write", "    permissions:\n      contents: write\n      id-token: write"],
+  ["pull-requests write", "    permissions:\n      pull-requests: write"],
+  ["contents read plus another scope", "    permissions:\n      contents: read\n      checks: write"],
+])("rejects job-level permissions of %s", (_label, permissions) => {
+  expect(checkWorkflow("w.yml", withJobPermissions(permissions))).toEqual(["w.yml: job ci may only set permissions of exactly contents: read"]);
+});
+
+test("accepts job-level permissions of exactly contents: read", () => {
+  expect(checkWorkflow("w.yml", withJobPermissions("    permissions:\n      contents: read"))).toEqual([]);
+});
+
+test.each([
+  ["contents: write", "permissions:\n  contents: write"],
+  ["read-all", "permissions: read-all"],
+])("rejects top-level permissions of %s", (_label, permissions) => {
+  expect(checkWorkflow("w.yml", workflow({ permissions }))).toEqual(["w.yml: must declare top-level permissions of exactly contents: read"]);
+});
+
+test.each([
+  ["toJSON(secrets)", "run: echo '${{ toJSON(secrets) }}'"],
+  ["an upper-case SECRETS context", "run: echo ${{ SECRETS.X }}"],
+  ["secrets: inherit", "uses: ./.github/workflows/reusable.yml\n        secrets: inherit"],
+  ["an env value from secrets", "run: true\n        env:\n          X: ${{ secrets.X }}"],
+])("rejects %s", (_label, step) => {
+  expect(checkWorkflow("w.yml", workflow({ step }))).toContain("w.yml: references secrets");
+});
+
+test("ignores the word secrets in a YAML comment", () => {
+  expect(checkWorkflow("w.yml", `# no secrets are used\n${workflow()}`)).toEqual([]);
+});

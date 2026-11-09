@@ -74,7 +74,16 @@ export async function renderOutputs(skills: Skill[]): Promise<Map<string, Buffer
   }
   outputs.set(INDEX_PATH, stableJson({ $schema: DISCOVERY_SCHEMA_URI, skills: entries }));
 
-  const listed = skills.length > 0;
+  for (const [file, data] of renderManifests(skills.length > 0)) outputs.set(file, data);
+  return new Map([...outputs.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+/**
+ * Renders the plugin marketplace and plugin manifests. The marketplaces list
+ * the `udibo` plugin, and the plugin manifests exist, only when `listed`.
+ */
+export function renderManifests(listed: boolean): Map<string, Buffer> {
+  const outputs = new Map<string, Buffer>();
   outputs.set(
     `${MARKETPLACE_DIR}/.claude-plugin/marketplace.json`,
     stableJson({
@@ -102,5 +111,5 @@ export async function renderOutputs(skills: Skill[]): Promise<Map<string, Buffer
       stableJson({ name: PLUGIN_NAME, description: PLUGIN_DESCRIPTION, skills: "./skills/" }),
     );
   }
-  return new Map([...outputs.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  return outputs;
 }

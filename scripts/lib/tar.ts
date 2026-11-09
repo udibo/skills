@@ -30,23 +30,34 @@ export function createTarGz(entries: ArchiveEntry[]): Buffer {
 
 /**
  * Reads the regular files of a gzip-compressed tar archive, including the
- * pax and GNU long-name forms npm uses. Throws on a symbolic or hard link, a
- * path that is absolute or contains `..`, or more than 64 MiB unpacked.
+ * pax and GNU long-name forms npm uses. Throws on a symbolic or hard link, any
+ * entry type other than a file or directory, a path that is absolute or
+ * contains `..`, a malformed or out-of-range size, a bad header checksum, a
+ * missing end-of-archive block, or more than `maxUnpackedBytes` (64 MiB by
+ * default) once decompressed.
  */
-export function readTarGz(archive: Buffer): ArchiveEntry[] {
-  const tar = gunzipSync(archive, { maxOutputLength: MAX_UNPACKED_BYTES });
+export function readTarGz(archive: Buffer, options: { maxUnpackedBytes?: number } = {}): ArchiveEntry[] {
+  const tar = gunzipSync(archive, { maxOutputLength: options.maxUnpackedBytes ?? MAX_UNPACKED_BYTES });
   const entries: ArchiveEntry[] = [];
   let offset = 0;
   let pendingPath: string | undefined;
+  let ended = false;
   while (offset + BLOCK <= tar.length) {
     const block = tar.subarray(offset, offset + BLOCK);
-    if (block.every((byte) => byte === 0)) break;
-    const size = parseInt(field(block, 124, 12).trim() || "0", 8);
+    if (block.every((byte) => byte === 0)) {
+      ended = true;
+      break;
+    }
+    verifyChecksum(block, offset);
+    const size = parseSize(block, offset);
+    const dataEnd = offset + BLOCK + size;
+    const next = offset + BLOCK + Math.ceil(size / BLOCK) * BLOCK;
+    if (next > tar.length) throw new Error(`archive entry at byte ${offset} declares ${size} bytes past the end of the archive`);
     const type = String.fromCharCode(block[156] ?? 0);
     const prefix = field(block, 345, 155);
     const name = field(block, 0, 100);
-    const data = tar.subarray(offset + BLOCK, offset + BLOCK + size);
-    offset += BLOCK + Math.ceil(size / BLOCK) * BLOCK;
+    const data = tar.subarray(offset + BLOCK, dataEnd);
+    offset = next;
     if (type === "x") {
       pendingPath = paxPath(data) ?? pendingPath;
       continue;
@@ -67,8 +78,27 @@ export function readTarGz(archive: Buffer): ArchiveEntry[] {
     assertSafePath(entryPath);
     entries.push({ path: entryPath, data: Buffer.from(data) });
   }
+  if (!ended) throw new Error("archive has no end-of-archive block");
   return entries;
 }
+
+function parseSize(block: Buffer, offset: number): number {
+  if (((block[124] ?? 0) & 0x80) !== 0) throw new Error(`archive entry at byte ${offset} uses an unsupported base-256 size`);
+  const text = block.subarray(124, 136).toString("latin1").replace(/[\0 ]+$/, "").replace(/^ +/, "");
+  if (!/^[0-7]*$/.test(text)) throw new Error(`archive entry at byte ${offset} has an invalid size field`);
+  const size = text === "" ? 0 : parseInt(text, 8);
+  if (!Number.isSafeInteger(size) || size < 0) throw new Error(`archive entry at byte ${offset} has an invalid size field`);
+  return size;
+}
+
+function verifyChecksum(block: Buffer, offset: number): void {
+  const text = block.subarray(148, 156).toString("latin1").replace(/[\0 ]+$/, "").replace(/^ +/, "");
+  let sum = 0;
+  for (let index = 0; index < BLOCK; index++) sum += index >= 148 && index < 156 ? 32 : (block[index] ?? 0);
+  if (!/^[0-7]+$/.test(text) || parseInt(text, 8) !== sum) throw new Error(`archive entry at byte ${offset} has a bad header checksum`);
+}
+
+
 
 function assertSafePath(entryPath: string): void {
   if (

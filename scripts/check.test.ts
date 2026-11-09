@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
 import { build } from "./build.ts";
-import { check, main } from "./check.ts";
+import { check, compareBuilds, main } from "./check.ts";
 import { verifyDist } from "./lib/verify.ts";
 import { copyPlaceholders, FIXTURES, tempDir } from "./lib/testing.ts";
 
@@ -37,7 +37,7 @@ describe("verifyDist", () => {
     await appendFile(path.join(distDir, ".well-known/agent-skills/placeholder-migration/SKILL.md"), "\nInjected line.\n");
     const problems = await verifyDist(distDir);
     expect(problems).toHaveLength(2);
-    expect(problems[1]).toBe("plugin-marketplace/plugins/udibo/skills/placeholder-migration/SKILL.md: not part of any indexed skill");
+    expect(problems[1]).toBe("plugin-marketplace/plugins/udibo/skills/placeholder-migration/SKILL.md: not produced by the build");
     expect(problems[0]).toMatch(
       /^\.well-known\/agent-skills\/index\.json: placeholder-migration: digest sha256:[0-9a-f]{64} does not match the artifact's sha256:[0-9a-f]{64}$/,
     );
@@ -93,7 +93,7 @@ describe("verifyDist", () => {
       expect.arrayContaining([
         `${INDEX}: placeholder-migration: url https://cdn.example.com/SKILL.md is not a local path this check can verify`,
         `${INDEX}: placeholder-new-project: artifact /.well-known/agent-skills/placeholder-new-project/SKILL.md does not exist`,
-        ".well-known/agent-skills/stray.md: not listed in the index",
+        ".well-known/agent-skills/stray.md: not produced by the build",
       ]),
     );
   });
@@ -103,7 +103,7 @@ describe("verifyDist", () => {
     const distDir = await builtPlaceholders(dir.path);
     await appendFile(path.join(distDir, "plugin-marketplace/plugins/udibo/skills/placeholder-new-project/SKILL.md"), "extra\n");
     expect(await verifyDist(distDir)).toEqual([
-      "plugin-marketplace/plugins/udibo/skills/placeholder-new-project/SKILL.md: differs from the indexed artifact",
+      "plugin-marketplace/plugins/udibo/skills/placeholder-new-project/SKILL.md: differs from what the build produces",
     ]);
   });
 
@@ -115,8 +115,50 @@ describe("verifyDist", () => {
     manifest.plugins = [];
     await writeFile(file, JSON.stringify(manifest));
     expect(await verifyDist(distDir)).toEqual([
-      'plugin-marketplace/.cursor-plugin/marketplace.json: plugins [] should be [{"name":"udibo","source":"plugins/udibo"}]',
+      "plugin-marketplace/.cursor-plugin/marketplace.json: differs from what the build produces",
     ]);
+  });
+});
+
+describe("verifyDist allows only the files the build writes", () => {
+  test.each([
+    ["a hooks file in the plugin", "plugin-marketplace/plugins/udibo/hooks/hooks.json"],
+    ["an MCP config in the plugin", "plugin-marketplace/plugins/udibo/.mcp.json"],
+    ["a script at the root of dist", "evil.sh"],
+    ["an extra file inside a skill copy", "plugin-marketplace/plugins/udibo/skills/placeholder-migration/extra.md"],
+  ])("rejects %s", async (_label, file) => {
+    await using dir = await tempDir();
+    const distDir = await builtPlaceholders(dir.path);
+    await mkdir(path.dirname(path.join(distDir, file)), { recursive: true });
+    await writeFile(path.join(distDir, file), "{}");
+    expect(await verifyDist(distDir)).toEqual([`${file}: not produced by the build`]);
+  });
+
+  test("rejects a plugin manifest rewritten to add hooks", async () => {
+    await using dir = await tempDir();
+    const distDir = await builtPlaceholders(dir.path);
+    const file = path.join(distDir, "plugin-marketplace/plugins/udibo/.claude-plugin/plugin.json");
+    const manifest = JSON.parse(await readFile(file, "utf8"));
+    await writeFile(file, `${JSON.stringify({ ...manifest, hooks: "./hooks/hooks.json" }, null, 2)}\n`);
+    expect(await verifyDist(distDir)).toEqual(["plugin-marketplace/plugins/udibo/.claude-plugin/plugin.json: differs from what the build produces"]);
+  });
+
+  test("rejects a missing plugin manifest", async () => {
+    await using dir = await tempDir();
+    const distDir = await builtPlaceholders(dir.path);
+    await rm(path.join(distDir, "plugin-marketplace/plugins/udibo/.codex-plugin/plugin.json"));
+    expect(await verifyDist(distDir)).toEqual(["plugin-marketplace/plugins/udibo/.codex-plugin/plugin.json: missing from the build"]);
+  });
+
+  test("rejects an index entry whose name differs from its SKILL.md", async () => {
+    await using dir = await tempDir();
+    const distDir = await builtPlaceholders(dir.path);
+    await editIndex(distDir, (index) => {
+      index.skills[1]!["name"] = "renamed-skill";
+    });
+    expect(await verifyDist(distDir)).toEqual(
+      expect.arrayContaining([`${INDEX}: renamed-skill: SKILL.md name "placeholder-migration" differs from the index`]),
+    );
   });
 });
 
@@ -148,6 +190,32 @@ describe("check", () => {
     await appendFile(path.join(distDir, ".well-known/agent-skills/placeholder-migration/SKILL.md"), "x");
     const problems = await check({ sources: { skillsDir: path.join(dir.path, "empty") }, distDir });
     expect(problems.join("\n")).toMatch(/^dist: .*placeholder-migration: digest/);
+  });
+});
+
+describe("compareBuilds", () => {
+  test("accepts identical builds", async () => {
+    await using dir = await tempDir();
+    await mkdir(path.join(dir.path, "a"));
+    await mkdir(path.join(dir.path, "b"));
+    await writeFile(path.join(dir.path, "a", "x.json"), "1");
+    await writeFile(path.join(dir.path, "b", "x.json"), "1");
+    expect(await compareBuilds(path.join(dir.path, "a"), path.join(dir.path, "b"), ["x.json"], ["x.json"])).toEqual([]);
+  });
+
+  test("reports a file whose bytes differ between two builds", async () => {
+    await using dir = await tempDir();
+    await mkdir(path.join(dir.path, "a"));
+    await mkdir(path.join(dir.path, "b"));
+    await writeFile(path.join(dir.path, "a", "x.json"), "1");
+    await writeFile(path.join(dir.path, "b", "x.json"), "2");
+    expect(await compareBuilds(path.join(dir.path, "a"), path.join(dir.path, "b"), ["x.json"], ["x.json"])).toEqual([
+      "build is not deterministic: x.json differs between two runs",
+    ]);
+  });
+
+  test("reports builds that wrote different file lists", async () => {
+    expect(await compareBuilds("a", "b", ["x.json"], ["y.json"])).toEqual(["build is not deterministic: two runs wrote different file lists"]);
   });
 });
 

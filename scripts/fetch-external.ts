@@ -11,10 +11,13 @@ export type FetchOptions = {
   externalFile: string;
   cacheDir: string;
   registry?: string;
+  maxTarballBytes?: number;
+  timeoutMs?: number;
 };
 
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const MAX_TARBALL_BYTES = 32 * 1024 * 1024;
+const TIMEOUT_MS = 60_000;
 
 /** The registry URL of a package's published tarball at one version. */
 export function tarballUrl(registry: string, packageName: string, version: string): string {
@@ -24,14 +27,20 @@ export function tarballUrl(registry: string, packageName: string, version: strin
 
 /**
  * Downloads each pinned package tarball, rejects it unless its sha512 equals
- * the pinned integrity, and unpacks its `skills/<name>/` folder into the cache.
- * Returns the names fetched. Throws on the first failure.
+ * the pinned integrity, and replaces the cached `skills/<name>/` folder with
+ * the one it holds. A download larger than `maxTarballBytes` (32 MiB) or
+ * slower than `timeoutMs` (60 s) is aborted. Returns the names fetched.
+ * Throws on the first failure.
  */
 export async function fetchExternal(options: FetchOptions): Promise<string[]> {
   const pins = await readExternalPins(options.externalFile);
   const registry = options.registry ?? DEFAULT_REGISTRY;
   for (const pin of pins) {
-    const tarball = await download(tarballUrl(registry, pin.package, pin.version));
+    const tarball = await download(
+      tarballUrl(registry, pin.package, pin.version),
+      options.maxTarballBytes ?? MAX_TARBALL_BYTES,
+      options.timeoutMs ?? TIMEOUT_MS,
+    );
     const actual = `sha512-${createHash("sha512").update(tarball).digest("base64")}`;
     if (actual !== pin.integrity) {
       throw new Error(`${pin.package}@${pin.version}: tarball integrity ${actual} does not match the pinned ${pin.integrity}`);
@@ -41,12 +50,26 @@ export async function fetchExternal(options: FetchOptions): Promise<string[]> {
   return pins.map((pin) => pin.name);
 }
 
-async function download(url: string): Promise<Buffer> {
-  const response = await fetch(url, { redirect: "follow" });
-  if (!response.ok) throw new Error(`GET ${url} returned ${response.status}`);
-  const body = Buffer.from(await response.arrayBuffer());
-  if (body.length > MAX_TARBALL_BYTES) throw new Error(`GET ${url} returned more than ${MAX_TARBALL_BYTES} bytes`);
-  return body;
+async function download(url: string, maxBytes: number, timeoutMs: number): Promise<Buffer> {
+  const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`GET ${url} returned ${response.status}`);
+  }
+  const tooLarge = `GET ${url} returned more than ${maxBytes} bytes`;
+  const declared = Number(response.headers.get("content-length"));
+  if (response.headers.has("content-length") && declared > maxBytes) {
+    await response.body?.cancel();
+    throw new Error(tooLarge);
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for await (const chunk of response.body ?? []) {
+    total += chunk.byteLength;
+    if (total > maxBytes) throw new Error(tooLarge);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function unpackSkill(tarball: Buffer, pin: ExternalPin, cacheDir: string): Promise<void> {

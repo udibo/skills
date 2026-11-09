@@ -4,20 +4,20 @@ import path from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
 
 import { parseFrontmatter } from "./frontmatter.ts";
-import { INDEX_PATH, MARKETPLACE_DIR, PLUGIN_DIR, PLUGIN_NAME, sha256Digest } from "./outputs.ts";
+import { INDEX_PATH, PLUGIN_DIR, renderManifests, sha256Digest } from "./outputs.ts";
 import type { IndexEntry } from "./outputs.ts";
 import { compare } from "./skill.ts";
 import { readTarGz } from "./tar.ts";
 
 const SCHEMA_FILE = new URL("../../schemas/agent-skills-discovery-0.2.0.schema.json", import.meta.url);
 const SKILLS_DIR = ".well-known/agent-skills";
-const MANIFEST_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
  * Verifies a built `dist/` directory: the index validates against the vendored
  * discovery schema, every artifact it names exists locally with a matching
- * SHA-256 digest and a SKILL.md that agrees with its entry, no artifact is
- * unlisted, and the plugin marketplace lists exactly the indexed skills.
+ * SHA-256 digest and a SKILL.md that agrees with its entry, every manifest is
+ * byte-for-byte what the build writes, the plugin holds exactly the indexed
+ * skills' files, and no other file exists anywhere under `distDir`.
  * Returns one message per problem; an empty list means the build is sound.
  */
 export async function verifyDist(distDir: string): Promise<string[]> {
@@ -88,73 +88,35 @@ export async function verifyDist(distDir: string): Promise<string[]> {
     artifacts.set(entry.name, files);
   }
 
-  for (const file of await listFiles(path.join(distDir, SKILLS_DIR))) {
-    const relative = `${SKILLS_DIR}/${file}`;
-    if (!referenced.has(relative)) problems.push(`${relative}: not listed in the index`);
-  }
-
-  problems.push(...(await verifyMarketplace(distDir, artifacts)));
+  problems.push(...(await verifyTree(distDir, referenced, artifacts, entries.length > 0)));
   return problems;
 }
 
-async function verifyMarketplace(distDir: string, artifacts: Map<string, Map<string, Buffer>>): Promise<string[]> {
+async function verifyTree(
+  distDir: string,
+  referenced: Set<string>,
+  artifacts: Map<string, Map<string, Buffer>>,
+  listed: boolean,
+): Promise<string[]> {
   const problems: string[] = [];
-  const root = path.join(distDir, MARKETPLACE_DIR);
-  const expectedSources: Record<string, string> = {
-    ".claude-plugin/marketplace.json": `./plugins/${PLUGIN_NAME}`,
-    ".cursor-plugin/marketplace.json": `plugins/${PLUGIN_NAME}`,
-  };
-  for (const [manifest, expectedSource] of Object.entries(expectedSources)) {
-    const where = `${MARKETPLACE_DIR}/${manifest}`;
-    let parsed: { name?: unknown; owner?: { name?: unknown }; plugins?: unknown };
-    try {
-      parsed = JSON.parse(await readFile(path.join(root, manifest), "utf8")) as typeof parsed;
-    } catch (error) {
-      problems.push(`${where}: ${(error as Error).message}`);
-      continue;
-    }
-    if (typeof parsed.name !== "string" || !MANIFEST_NAME.test(parsed.name)) problems.push(`${where}: invalid marketplace name`);
-    if (typeof parsed.owner?.name !== "string") problems.push(`${where}: owner.name is required`);
-    if (!Array.isArray(parsed.plugins)) {
-      problems.push(`${where}: plugins must be an array`);
-      continue;
-    }
-    const expected = artifacts.size > 0 ? [{ name: PLUGIN_NAME, source: expectedSource }] : [];
-    const actual = (parsed.plugins as { name?: unknown; source?: unknown }[]).map(({ name, source }) => ({ name, source }));
-    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-      problems.push(`${where}: plugins ${JSON.stringify(actual)} should be ${JSON.stringify(expected)}`);
-    }
-  }
-
-  const pluginRoot = path.join(distDir, PLUGIN_DIR);
-  const pluginFiles = await listFiles(pluginRoot);
-  if (artifacts.size === 0) {
-    if (pluginFiles.length > 0) problems.push(`${PLUGIN_DIR}: exists although no skill is published`);
-    return problems;
-  }
-  for (const manifest of [".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", ".codex-plugin/plugin.json"]) {
-    try {
-      const parsed = JSON.parse(await readFile(path.join(pluginRoot, manifest), "utf8")) as { name?: unknown };
-      if (parsed.name !== PLUGIN_NAME) problems.push(`${PLUGIN_DIR}/${manifest}: name must be "${PLUGIN_NAME}"`);
-    } catch (error) {
-      problems.push(`${PLUGIN_DIR}/${manifest}: ${(error as Error).message}`);
-    }
-  }
-  const expected = new Map<string, Buffer>();
+  const expected = new Map<string, Buffer | undefined>([...referenced].map((file) => [file, undefined]));
+  for (const [file, data] of renderManifests(listed)) expected.set(file, data);
   for (const [name, files] of artifacts) {
-    for (const [file, data] of files) expected.set(`skills/${name}/${file}`, data);
+    for (const [file, data] of files) expected.set(`${PLUGIN_DIR}/skills/${name}/${file}`, data);
   }
-  const shipped = pluginFiles.filter((file) => file.startsWith("skills/"));
-  for (const file of shipped) {
-    const source = expected.get(file);
-    if (!source) {
-      problems.push(`${PLUGIN_DIR}/${file}: not part of any indexed skill`);
-    } else if (!source.equals(await readFile(path.join(pluginRoot, file)))) {
-      problems.push(`${PLUGIN_DIR}/${file}: differs from the indexed artifact`);
+  const present = await listFiles(distDir);
+  for (const file of present) {
+    if (!expected.has(file)) {
+      problems.push(`${file}: not produced by the build`);
+      continue;
+    }
+    const content = expected.get(file);
+    if (content !== undefined && !content.equals(await readFile(path.join(distDir, file)))) {
+      problems.push(`${file}: differs from what the build produces`);
     }
   }
   for (const file of expected.keys()) {
-    if (!shipped.includes(file)) problems.push(`${PLUGIN_DIR}/${file}: missing from the plugin`);
+    if (!present.includes(file) && !referenced.has(file)) problems.push(`${file}: missing from the build`);
   }
   return problems;
 }
