@@ -1,0 +1,22 @@
+{
+  "name": "@udibo/skills-repository",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.10.1",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json && node scripts/check.ts",
+    "test": "vitest run",
+    "build": "node scripts/build.ts",
+    "fetch-external": "node scripts/fetch-external.ts"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "ajv": "8.20.0",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5",
+    "yaml": "2.9.1"
+  }
+}
