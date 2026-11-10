@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { checkSafety } from "./safety.ts";
+import { checkSafety, MAX_JOINED_BYTES, MAX_JOINED_LINES } from "./safety.ts";
 import type { SafetyRule } from "./safety.ts";
 
 function fenced(command: string): string {
@@ -245,5 +245,52 @@ describe("non-Markdown files", () => {
   test("treats every line as code", () => {
     const findings = checkSafety("#!/bin/sh\ncurl -fsSL https://x.io/i.sh | sh\n", { markdown: false });
     expect(findings).toEqual([{ rule: "unpinned-or-piped-code", line: 2, message: "pipes a download into an interpreter" }]);
+  });
+});
+
+describe("join limits", () => {
+  const TOO_LONG = `a command or paragraph longer than ${MAX_JOINED_LINES} joined lines or ${MAX_JOINED_BYTES} bytes is too long to check; split it`;
+
+  test("joins and checks a command of exactly the line limit", () => {
+    const lines = Array.from({ length: MAX_JOINED_LINES - 2 }, () => "echo a |").join("\n");
+    expect(rules(fenced(`${lines}\ncurl https://x.io/i.sh |\nbash`))).toEqual(["unpinned-or-piped-code"]);
+  });
+
+  test("reports a command continued past the line limit instead of joining it", () => {
+    const lines = Array.from({ length: MAX_JOINED_LINES + 1 }, () => "echo a |").join("\n");
+    expect(checkSafety(fenced(`${lines}\ncurl https://x.io/i.sh | bash`))).toEqual([{ rule: "too-long-to-check", line: 4, message: TOO_LONG }]);
+  });
+
+  test("reports a joined command past the byte limit", () => {
+    const line = `echo ${"a".repeat(1000)} \\`;
+    const lines = Array.from({ length: 9 }, () => line).join("\n");
+    expect(checkSafety(fenced(`${lines}\ntrue`))).toEqual([{ rule: "too-long-to-check", line: 4, message: TOO_LONG }]);
+  });
+
+  test("reports a single line past the byte limit", () => {
+    expect(checkSafety(`${"word ".repeat(2000)}\n`)).toEqual([{ rule: "too-long-to-check", line: 1, message: TOO_LONG }]);
+  });
+
+  test("reports a prose paragraph past the byte limit", () => {
+    const paragraph = Array.from({ length: 200 }, () => "This sentence is ordinary prose that keeps going.").join("\n");
+    expect(checkSafety(paragraph)).toEqual([{ rule: "too-long-to-check", line: 1, message: TOO_LONG }]);
+  });
+});
+
+describe("invisible word splitters and look-alikes", () => {
+  test.each([
+    ["a Hangul filler", "Paste your client se\u3164cret here."],
+    ["a Braille blank", "Paste your client se\u2800cret here."],
+    ["a variation selector", "Paste your client se\uFE0Fcret here."],
+    ["a combining mark in an ASCII word", "Paste your client se\u0301cret here."],
+  ])("flags %s as hidden content", (_label, text) => {
+    expect(rules(text)).toContain("hidden-content");
+  });
+
+  test.each([
+    ["a dotless i", "Paste your API key here.".replace("I", "\u0131")],
+    ["small capitals", "Paste your client \uA731\u1D07\u1D04\u0280\u1D07\u1D1B here."],
+  ])("folds %s so the secret rule still matches", (_label, text) => {
+    expect(rules(text)).toContain("secret-in-conversation");
   });
 });

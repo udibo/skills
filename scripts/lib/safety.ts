@@ -1,22 +1,33 @@
 import { classifyLines, inlineCodeSpans, withoutInlineCode } from "./markdown.ts";
 
-export type SafetyRule = "secret-in-conversation" | "unpinned-or-piped-code" | "unfenced-command" | "hidden-content";
+export type SafetyRule =
+  | "secret-in-conversation"
+  | "unpinned-or-piped-code"
+  | "unfenced-command"
+  | "hidden-content"
+  | "too-long-to-check";
 
 export type SafetyFinding = { rule: SafetyRule; line: number; message: string };
 
 type Candidate = { text: string; line: number };
 
-type Paragraph = Candidate & { end: number };
+type Paragraph = Candidate & { end: number; tooLong: boolean };
+
+export const MAX_JOINED_LINES: number = 10;
+export const MAX_JOINED_BYTES: number = 8192;
 
 const LOOKALIKES: Record<string, string> = {
   а: "a", в: "b", е: "e", ё: "e", к: "k", м: "m", н: "h", о: "o", р: "p", с: "c", т: "t", у: "y", х: "x",
-  ѕ: "s", і: "i", ї: "i", ј: "j", ԁ: "d", ӏ: "l", ԛ: "q", ԝ: "w", ɡ: "g",
+  ѕ: "s", і: "i", ї: "i", ј: "j", ԁ: "d", ӏ: "l", ԛ: "q", ԝ: "w", ɡ: "g", ı: "i",
+  ᴀ: "a", ʙ: "b", ᴄ: "c", ᴅ: "d", ᴇ: "e", ꜰ: "f", ɢ: "g", ʜ: "h", ɪ: "i", ᴊ: "j", ᴋ: "k", ʟ: "l", ᴍ: "m", ɴ: "n",
+  ᴏ: "o", ᴘ: "p", ʀ: "r", ꜱ: "s", ᴛ: "t", ᴜ: "u", ᴠ: "v", ᴡ: "w", ʏ: "y", ᴢ: "z",
   А: "A", В: "B", Е: "E", К: "K", М: "M", Н: "H", О: "O", Р: "P", С: "C", Т: "T", Х: "X", Ѕ: "S", І: "I", Ј: "J",
   α: "a", ε: "e", ι: "i", κ: "k", ν: "v", ο: "o", ρ: "p", τ: "t", υ: "u", χ: "x",
   Α: "A", Β: "B", Ε: "E", Ζ: "Z", Η: "H", Ι: "I", Κ: "K", Μ: "M", Ν: "N", Ο: "O", Ρ: "P", Τ: "T", Υ: "Y", Χ: "X",
 };
 const LOOKALIKE_PATTERN = new RegExp(`[${Object.keys(LOOKALIKES).join("")}]`, "g");
-const FORMAT_OR_PRIVATE = /[\p{Cf}\p{Co}]/gu;
+const FORMAT_OR_PRIVATE = /[\p{Cf}\p{Co}\u115F\u1160\u2800\u3164\uFFA0\uFE00-\uFE0F\u{E0100}-\u{E01EF}]/gu;
+const COMBINING_MARK = /\p{M}/u;
 const LATIN = /\p{Script=Latin}/u;
 const CONFUSABLE_SCRIPT = /[\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Armenian}\p{Script=Cherokee}]/u;
 
@@ -125,11 +136,26 @@ export function checkSafety(text: string, options: { markdown?: boolean } = {}):
     }
   }
 
-  for (const command of [...joinContinuations(code), ...spans, ...prose]) {
+  const tooLong = (candidate: { line: number; tooLong: boolean }): boolean => {
+    if (candidate.tooLong) {
+      add(
+        "too-long-to-check",
+        candidate.line,
+        `a command or paragraph longer than ${MAX_JOINED_LINES} joined lines or ${MAX_JOINED_BYTES} bytes is too long to check; split it`,
+      );
+    }
+    return candidate.tooLong;
+  };
+  const fits = (candidate: Candidate): boolean => !tooLong({ line: candidate.line, tooLong: candidate.text.length > MAX_JOINED_BYTES });
+  const checkSpans = spans.filter(fits);
+  const checkProse = prose.filter(fits);
+  const checkCode = joinContinuations(code).filter((command) => !tooLong(command));
+  const proseParagraphs = paragraphs(checkProse).filter((paragraph) => !tooLong(paragraph));
+  for (const command of [...checkCode, ...checkSpans, ...checkProse]) {
     secretCommandFindings(command.text).forEach((message) => add("secret-in-conversation", command.line, message));
     unpinnedCodeFindings(command.text).forEach((message) => add("unpinned-or-piped-code", command.line, message));
   }
-  for (const paragraph of paragraphs(prose).filter(({ line, end }) => end > line)) {
+  for (const paragraph of proseParagraphs.filter(({ line, end }) => end > line)) {
     const already = (rule: SafetyRule, message: string): boolean =>
       findings.some((finding) => finding.rule === rule && finding.message === message && finding.line >= paragraph.line && finding.line <= paragraph.end);
     for (const message of secretCommandFindings(paragraph.text)) {
@@ -142,17 +168,17 @@ export function checkSafety(text: string, options: { markdown?: boolean } = {}):
 
   if (!markdown) return sortFindings(findings);
 
-  for (const span of spans) {
+  for (const span of checkSpans) {
     if (COMMAND_START.test(span.text) || invokesPackageTool(span.text)) {
       add("unfenced-command", span.line, `command \`${span.text}\` is in inline code; put commands the agent runs in a fenced block`);
     }
   }
-  for (const line of prose) {
+  for (const line of checkProse) {
     if (proseSegments(line.text).some(readsAsCommand)) {
       add("unfenced-command", line.line, "line reads as a command outside a fenced block");
     }
   }
-  for (const paragraph of paragraphs(prose)) {
+  for (const paragraph of proseParagraphs) {
     for (const clause of clauses(paragraph.text)) {
       if (NEGATION.test(clause)) continue;
       if (HANDOVER_VERB.test(clause) && SECRET_NOUN.test(clause)) {
@@ -187,6 +213,10 @@ function hiddenContent(text: string, markdown: boolean): { line: number; message
         found.push({ line, message: `word "${word}" mixes Latin with look-alike letters from another script` });
         break;
       }
+      if (LATIN.test(word) && COMBINING_MARK.test(word)) {
+        found.push({ line, message: `word "${word}" carries a combining mark` });
+        break;
+      }
     }
   }
   return found;
@@ -218,38 +248,60 @@ function readsAsCommand(segment: string): boolean {
   );
 }
 
-function joinContinuations(lines: Candidate[]): Candidate[] {
-  const joined: Candidate[] = [];
-  let pending: Candidate | undefined;
+function joinContinuations(lines: Candidate[]): Paragraph[] {
+  const joined: Paragraph[] = [];
+  let parts: string[] = [];
+  let start = 0;
+  let count = 0;
+  let bytes = 0;
   for (const { text, line } of lines) {
-    const current: Candidate = pending ? { text: `${pending.text} ${text.trim()}`, line: pending.line } : { text, line };
-    if (/(?:\\|`|\||&&|\|\|)\s*$/.test(text)) {
-      pending = { text: current.text.replace(/[\\`]\s*$/, ""), line: current.line };
-    } else {
-      joined.push(current);
-      pending = undefined;
+    if (count === 0) start = line;
+    const continues = /(?:\\|`|\||&&)\s*$/.test(text);
+    const piece = continues ? text.replace(/[\\`]\s*$/, "") : text;
+    count++;
+    bytes += piece.length + 1;
+    const tooLong = count > MAX_JOINED_LINES || bytes > MAX_JOINED_BYTES;
+    if (!tooLong) parts.push(count === 1 ? piece : piece.trim());
+    if (!continues) {
+      joined.push({ text: tooLong ? "" : parts.join(" "), line: start, end: line, tooLong });
+      parts = [];
+      count = 0;
+      bytes = 0;
     }
   }
-  if (pending) joined.push(pending);
+  if (count > 0) {
+    const tooLong = count > MAX_JOINED_LINES || bytes > MAX_JOINED_BYTES;
+    joined.push({ text: tooLong ? "" : parts.join(" "), line: start, end: lines.at(-1)?.line ?? start, tooLong });
+  }
   return joined;
 }
 
 function paragraphs(prose: Candidate[]): Paragraph[] {
   const result: Paragraph[] = [];
-  let current: Paragraph | undefined;
+  let parts: string[] = [];
+  let start = 0;
+  let end = 0;
+  let bytes = 0;
+  const flush = (): void => {
+    if (parts.length === 0 && bytes === 0) return;
+    const tooLong = bytes > MAX_JOINED_BYTES;
+    result.push({ text: tooLong ? "" : parts.join(" "), line: start, end, tooLong });
+    parts = [];
+    bytes = 0;
+  };
   let previousLine = -1;
   for (const { text, line } of prose) {
-    const blank = text.trim() === "";
-    if (blank || line !== previousLine + 1) {
-      if (current) result.push(current);
-      current = undefined;
-    }
-    if (!blank) {
-      current = current ? { text: `${current.text} ${text.trim()}`, line: current.line, end: line } : { text: text.trim(), line, end: line };
+    const trimmed = text.trim();
+    if (trimmed === "" || line !== previousLine + 1) flush();
+    if (trimmed !== "") {
+      if (bytes === 0) start = line;
+      end = line;
+      bytes += trimmed.length + 1;
+      if (bytes <= MAX_JOINED_BYTES) parts.push(trimmed);
     }
     previousLine = line;
   }
-  if (current) result.push(current);
+  flush();
   return result;
 }
 

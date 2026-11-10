@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { parseFrontmatter } from "./frontmatter.ts";
@@ -32,6 +32,7 @@ const TARGET_RANGE = /^(?=.*(?:\d|\*))[0-9A-Za-z.^~<>=*|+ -]+$/;
 const KNOWN_FIELDS = new Set(["name", "description", "license", "compatibility", "metadata"]);
 const MARKDOWN_FILE = /\.(?:md|markdown|mdx)$/i;
 const MAX_SKILL_LINES = 500;
+export const MAX_FILE_BYTES: number = 64 * 1024;
 
 /**
  * Parses a `metadata.targets` value: a comma-separated list of
@@ -62,7 +63,22 @@ export async function loadSkill(dir: string, rules: SkillRules = {}): Promise<Sk
   if (!files.includes("SKILL.md")) {
     return { issues: [...issues, { file: "SKILL.md", message: "skill directory has no SKILL.md" }] };
   }
-  const raw = await readFile(path.join(dir, "SKILL.md"), "utf8");
+  const texts = new Map<string, string>();
+  for (const file of files) {
+    const size = (await stat(path.join(dir, file))).size;
+    if (size > MAX_FILE_BYTES) {
+      issues.push({ file, message: `file is ${size} bytes; the limit is ${MAX_FILE_BYTES}` });
+      continue;
+    }
+    const text = decodeText(await readFile(path.join(dir, file)));
+    if (text === undefined) {
+      issues.push({ file, message: "not a text file: it has a NUL byte or is not valid UTF-8, and skills may contain only text files" });
+      continue;
+    }
+    texts.set(file, text);
+  }
+  const raw = texts.get("SKILL.md");
+  if (raw === undefined) return { issues };
   if (raw.includes("\r")) {
     return { issues: [...issues, { file: "SKILL.md", message: "use LF line endings" }] };
   }
@@ -137,9 +153,7 @@ export async function loadSkill(dir: string, rules: SkillRules = {}): Promise<Sk
   const lineCount = raw.split("\n").length;
   if (lineCount > MAX_SKILL_LINES) fail(`SKILL.md has ${lineCount} lines; keep it under ${MAX_SKILL_LINES}`);
 
-  for (const file of files) {
-    const text = file === "SKILL.md" ? raw : decodeText(await readFile(path.join(dir, file)));
-    if (text === undefined) continue;
+  for (const [file, text] of texts) {
     const markdown = MARKDOWN_FILE.test(file);
     for (const finding of checkSafety(text, { markdown })) {
       issues.push({ file, line: finding.line, message: `[${finding.rule}] ${finding.message}` });

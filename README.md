@@ -84,9 +84,12 @@ The rules `scripts/check.ts` enforces:
 - **References.** In every Markdown file (`.md`, `.markdown`, `.mdx`, in any
   case), every relative link, and every inline path under `references/`,
   `assets/` or `scripts/`, resolves to a file inside the skill.
-- **Files.** No `scripts/` directory (a skill ships instructions, not code to
-  run), no dotfiles or dot-directories (so no `.env` can ship), no symbolic
-  links, no backslash in a file name, and LF line endings in `SKILL.md`.
+- **Files.** Every file is UTF-8 text with no NUL byte, and at most 64 KiB. A
+  file that is not text is rejected whatever its extension, so a skill can't
+  ship images for now. No `scripts/` directory (a skill ships instructions, not
+  code to run), no dotfiles or dot-directories (so no `.env` can ship), no
+  symbolic links, no backslash in a file name, and LF line endings in
+  `SKILL.md`.
 
 A skill made of `SKILL.md` alone is served as that file. A skill with reference
 files is served as a `.tar.gz` holding the skill directory, with `SKILL.md` at
@@ -95,12 +98,26 @@ its root.
 ### Safety rules
 
 A skill is instructions someone else's agent will follow, so every text file in
-a skill is checked against four rules. Binary files are skipped. Before
-matching, text is normalised: NFKC, invisible format characters removed, and
-common Cyrillic and Greek look-alike letters folded to Latin. In Markdown, list,
-quote, emphasis and table markers are stripped, prose lines that wrap are joined,
-and code lines ending in `\`, `|` or `&&` are joined to the next line. A
-non-Markdown text file is treated as code throughout.
+a skill is checked against the rules below. Every file is text (see _Files_
+above), so nothing in a skill escapes them.
+
+Before matching, text is normalised:
+
+- NFKC normalisation;
+- invisible format characters removed;
+- common Cyrillic and Greek look-alikes, the dotless `ı` and Latin small
+  capitals folded to plain Latin letters.
+
+In Markdown:
+
+- list, quote, emphasis and table markers are stripped;
+- prose lines that wrap are joined into paragraphs;
+- code lines ending in `\`, `|` or `&&` are joined to the next line.
+
+A joined command may span at most 10 lines and 8 KiB. A single line or prose
+paragraph may be at most 8 KiB. Anything longer is reported
+(`too-long-to-check`) rather than scanned, which keeps the checks linear in file
+size. A non-Markdown text file is treated as code throughout.
 
 1. **No secret in the conversation.** A skill never asks for a secret, token,
    key, password, credential or connection string to be pasted, shared, shown,
@@ -138,16 +155,35 @@ non-Markdown text file is treated as code throughout.
    in a fenced code block, never in inline code, a list item, a quote, a table
    cell or after a label such as `Run:`, so the person can see exactly what will
    run.
-4. **No hidden content.** No Unicode format characters (zero-width and bidi
-   controls, tag characters), no private-use characters, no HTML comments in
-   prose, and no word mixing Latin with look-alike letters from another script.
+4. **No hidden content.** None of these, because a reviewer cannot see them:
+   - Unicode format characters (zero-width and bidi controls, tag characters);
+   - private-use characters;
+   - blank letters (Hangul filler U+3164, Braille blank U+2800);
+   - variation selectors;
+   - HTML comments in prose;
+   - a Latin word carrying a combining mark, or mixing in look-alike letters
+     from another script.
+
+   Skills are written in English for now, and this rule rejects format
+   characters outright. That also rules out emoji joined with U+200D, scripts
+   that need U+200C or U+200D (such as Hindi, Persian and Arabic), and bidi
+   isolates in Hebrew. Script-aware exceptions are not built.
 
 These are conservative pattern checks. They back up human review and prove
 nothing: they can miss an unsafe instruction written in a way they don't
-recognise, and they can flag a safe sentence, which is then reworded. Commands
-the pin rule doesn't model (`git clone`, container images, system package
-managers) are left to review. Every
-skill still gets a reviewer reading it as instructions to a stranger's agent.
+recognise, and they can flag a safe sentence, which is then reworded. Every skill
+still gets a reviewer reading it as instructions to a stranger's agent.
+
+Not modelled, so left to review:
+
+- commands the pin rule doesn't parse: `git clone` without a pinned ref,
+  container images, system package managers (`brew`, `apt`, `winget`), and
+  language package managers other than npm, pnpm, Yarn, Bun, uvx and pipx
+  (`pip`, `cargo`, `go install`, `gem`, `composer`);
+- link targets the link check doesn't parse: link paths containing
+  parentheses, and targets in raw HTML (`<a href>`, `<img src>`);
+- the fetched cache is trusted by its recorded pin. The build doesn't re-hash
+  `.cache/` against the tarball's integrity.
 
 ### Skills owned by another repository
 
