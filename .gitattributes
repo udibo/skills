@@ -1,3 +1,6 @@
 * text=auto eol=lf
 *.tgz binary
 *.tar.gz binary
+.claude-plugin/** linguist-generated
+.cursor-plugin/** linguist-generated
+plugins/** linguist-generated

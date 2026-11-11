@@ -1,0 +1,9 @@
+{
+  "name": "udibo",
+  "description": "Agent skills for building on Udibo Identity and @udibo/oauth2.",
+  "owner": {
+    "name": "Udibo",
+    "url": "https://github.com/udibo"
+  },
+  "plugins": []
+}

@@ -224,6 +224,15 @@ from the pinned version, or when its `targets` don't name the package.
 Updating the skill means changing the pin, in a pull request like any other
 change. No package is pinned yet.
 
+### Generated marketplace tree
+
+`.claude-plugin/`, `.cursor-plugin/` and `plugins/` at the repository root are
+build output, committed so a tag carries a ready marketplace. Never edit them by
+hand. After changing a skill, run `pnpm build` and commit the result;
+`pnpm check` fails, naming that command, when the committed tree differs from
+what the build produces. They are marked `linguist-generated` in
+`.gitattributes`.
+
 ## Build and checks
 
 You need Node 26 (see `.nvmrc`) and the pnpm version in `package.json`.
@@ -245,9 +254,11 @@ pnpm build
   and no other file anywhere under the output. It also checks the CI workflows.
 - `pnpm build` writes `dist/`: the index and artifacts under
   `.well-known/agent-skills/`, and the plugin marketplace tree under
-  `plugin-marketplace/`. With no skills it writes an index whose `skills` array
+  `plugin-marketplace/`. It also regenerates the committed marketplace tree at
+  the repository root from the same output. With no skills it writes an index whose `skills` array
   is empty.
-  It also requires `package.json` and `LICENSE` to agree on the MIT licence.
+  It also requires `package.json` and `LICENSE` to agree on the MIT licence
+  and the committed marketplace tree to match the build byte for byte.
 - `node scripts/check.ts --dist dist` also verifies an existing build.
 - `pnpm test` runs the tests, which build the fixtures under `test/fixtures/`.
 
@@ -292,6 +303,8 @@ version of a release.
 ### Installing a release
 
 Claude Code accepts a `#<ref>` suffix on a marketplace, and a tag is a ref.
+The marketplace is committed at the repository root (see
+[Generated marketplace tree](#generated-marketplace-tree)), so a tag carries it.
 Pinning to a release looks like this:
 
 ```sh
@@ -299,12 +312,10 @@ claude plugin marketplace add udibo/skills#vX.Y.Z
 claude plugin install udibo@udibo
 ```
 
-This does not work yet. `claude plugin marketplace add` reads
-`.claude-plugin/marketplace.json` at the root of the repository at that ref,
-and this repository does not commit the marketplace: `pnpm build` writes it to
-`dist/plugin-marketplace/`, which git ignores. Until the marketplace tree is
-available at a tag, use the discovery index or the build output instead. This
-section is updated with the first published skill.
+Verified locally with the Claude Code CLI: `claude plugin validate` passes on
+the committed tree, and adding the repository by local path and running
+`claude plugin install udibo@udibo` installs the plugin. Not verified until a
+first tag exists: adding the marketplace from GitHub with a `#vX.Y.Z` suffix.
 
 ## Licence
 

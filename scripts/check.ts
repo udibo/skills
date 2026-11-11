@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { build, formatIssue, repositorySources } from "./build.ts";
 import type { SourceOptions } from "./lib/sources.ts";
+import { trackedDrift } from "./lib/tracked.ts";
 import { licenceProblems } from "./lib/release.ts";
 import { verifyDist } from "./lib/verify.ts";
 import { checkWorkflows } from "./lib/workflows.ts";
@@ -20,7 +21,7 @@ export type CheckOptions = {
  * Runs every repository check and returns one message per problem: source
  * skills against the specification, conventions and safety rules; two builds
  * into temporary directories that must be byte-identical and must verify; the
- * CI workflows; the licence files, when `root` is given; and, when `distDir` is given, an existing build.
+ * CI workflows; the licence files and the committed marketplace tree, when `root` is given; and, when `distDir` is given, an existing build.
  */
 export async function check(options: CheckOptions): Promise<string[]> {
   const problems: string[] = [];
@@ -33,6 +34,7 @@ export async function check(options: CheckOptions): Promise<string[]> {
       const second = await build({ ...options.sources, outDir: path.join(scratch, "b") });
       problems.push(...(await compareBuilds(path.join(scratch, "a"), path.join(scratch, "b"), first.files, second.files)));
       problems.push(...(await verifyDist(path.join(scratch, "a"))));
+      if (options.root !== undefined) problems.push(...(await trackedDrift(options.root, path.join(scratch, "a"))));
     }
   } finally {
     await rm(scratch, { recursive: true, force: true });

@@ -226,12 +226,13 @@ describe("main", () => {
     await cp(path.join(REPOSITORY, ".github"), path.join(root, ".github"), { recursive: true });
     await cp(path.join(REPOSITORY, "package.json"), path.join(root, "package.json"));
     await cp(path.join(REPOSITORY, "LICENSE"), path.join(root, "LICENSE"));
+    await build({ skillsDir: path.join(root, "skills"), outDir: path.join(root, "dist"), trackedDir: root });
   }
 
   test("passes on a clean checkout and verifies --dist", async () => {
     await using dir = await tempDir();
     await checkout(dir.path);
-    await build({ skillsDir: path.join(dir.path, "skills"), outDir: path.join(dir.path, "dist") });
+    await build({ skillsDir: path.join(dir.path, "skills"), outDir: path.join(dir.path, "dist"), trackedDir: dir.path });
     using log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     expect(await main(["--dist", "dist"], dir.path)).toBe(0);
     expect(log).toHaveBeenCalledWith("All checks passed.");
@@ -254,6 +255,29 @@ describe("main", () => {
     using error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     expect(await main([], dir.path)).toBe(1);
     expect(error).toHaveBeenCalledWith("LICENSE: file is missing");
+  });
+
+  test("fails when the committed marketplace tree is stale and names the command that regenerates it", async () => {
+    await using dir = await tempDir();
+    await checkout(dir.path);
+    await appendFile(path.join(dir.path, ".claude-plugin/marketplace.json"), " ");
+    using error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await main([], dir.path)).toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      ".claude-plugin/marketplace.json: differs from what the build produces; run `pnpm build` and commit the result",
+    );
+  });
+
+  test("fails on a missing or hand-added file in the committed marketplace tree", async () => {
+    await using dir = await tempDir();
+    await checkout(dir.path);
+    await rm(path.join(dir.path, ".cursor-plugin/marketplace.json"));
+    await mkdir(path.join(dir.path, "plugins/udibo"), { recursive: true });
+    await writeFile(path.join(dir.path, "plugins/udibo/extra.md"), "x\n");
+    using error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await main([], dir.path)).toBe(1);
+    expect(error).toHaveBeenCalledWith(".cursor-plugin/marketplace.json: missing from the generated marketplace tree; run `pnpm build` and commit the result");
+    expect(error).toHaveBeenCalledWith("plugins/udibo/extra.md: not produced by the build; run `pnpm build` and commit the result");
   });
 
   test("rejects --dist without a directory", async () => {

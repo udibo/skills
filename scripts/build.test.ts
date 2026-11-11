@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test, vi } from "vitest";
@@ -130,4 +130,17 @@ test("the CLI builds a repository checkout and fails with each issue printed", a
   await writeSkill(path.join(dir.path, "skills"), "udibo-broken", { "SKILL.md": "# no frontmatter\n" });
   expect(await main(dir.path)).toBe(1);
   expect(error).toHaveBeenCalledWith("udibo-broken/SKILL.md: SKILL.md must start with a '---' line opening the YAML frontmatter");
+});
+
+test("writes the marketplace into the tracked tree at the repository root, plugin sources resolving there", async () => {
+  await using dir = await tempDir();
+  const skillsDir = await copyPlaceholders(dir.path);
+  await build({ skillsDir, outDir: path.join(dir.path, "dist"), trackedDir: dir.path });
+  const claude = JSON.parse(await readFile(path.join(dir.path, ".claude-plugin/marketplace.json"), "utf8"));
+  expect(claude.plugins[0].source).toBe("./plugins/udibo");
+  expect(await readFile(path.join(dir.path, "plugins/udibo/.claude-plugin/plugin.json"), "utf8")).toContain('"name": "udibo"');
+  expect(await readFile(path.join(dir.path, "plugins/udibo/skills/udibo-placeholder-migration/SKILL.md"), "utf8")).toContain("name: udibo-placeholder-migration");
+  await rm(path.join(dir.path, "skills"), { recursive: true });
+  await build({ skillsDir, outDir: path.join(dir.path, "dist"), trackedDir: dir.path });
+  expect(JSON.parse(await readFile(path.join(dir.path, ".claude-plugin/marketplace.json"), "utf8")).plugins).toEqual([]);
 });
