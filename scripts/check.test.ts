@@ -13,7 +13,7 @@ const INDEX = ".well-known/agent-skills/index.json";
 
 async function builtPlaceholders(root: string): Promise<string> {
   const outDir = path.join(root, "dist");
-  const result = await build({ skillsDir: await copyPlaceholders(root), outDir, rules: {} });
+  const result = await build({ skillsDir: await copyPlaceholders(root), outDir });
   expect(result.issues).toEqual([]);
   return outDir;
 }
@@ -34,20 +34,20 @@ describe("verifyDist", () => {
   test("rejects an artifact whose bytes no longer match its digest", async () => {
     await using dir = await tempDir();
     const distDir = await builtPlaceholders(dir.path);
-    await appendFile(path.join(distDir, ".well-known/agent-skills/placeholder-migration/SKILL.md"), "\nInjected line.\n");
+    await appendFile(path.join(distDir, ".well-known/agent-skills/udibo-placeholder-migration/SKILL.md"), "\nInjected line.\n");
     const problems = await verifyDist(distDir);
     expect(problems).toHaveLength(2);
-    expect(problems[1]).toBe("plugin-marketplace/plugins/udibo/skills/placeholder-migration/SKILL.md: not produced by the build");
+    expect(problems[1]).toBe("plugin-marketplace/plugins/udibo/skills/udibo-placeholder-migration/SKILL.md: not produced by the build");
     expect(problems[0]).toMatch(
-      /^\.well-known\/agent-skills\/index\.json: placeholder-migration: digest sha256:[0-9a-f]{64} does not match the artifact's sha256:[0-9a-f]{64}$/,
+      /^\.well-known\/agent-skills\/index\.json: udibo-placeholder-migration: digest sha256:[0-9a-f]{64} does not match the artifact's sha256:[0-9a-f]{64}$/,
     );
   });
 
   test("rejects an archive whose bytes no longer match its digest", async () => {
     await using dir = await tempDir();
     const distDir = await builtPlaceholders(dir.path);
-    await appendFile(path.join(distDir, ".well-known/agent-skills/placeholder-existing-project.tar.gz"), Buffer.from([0]));
-    expect((await verifyDist(distDir)).join("\n")).toContain("placeholder-existing-project: digest");
+    await appendFile(path.join(distDir, ".well-known/agent-skills/udibo-placeholder-existing-project.tar.gz"), Buffer.from([0]));
+    expect((await verifyDist(distDir)).join("\n")).toContain("udibo-placeholder-existing-project: digest");
   });
 
   test("rejects an index that breaks the discovery schema", async () => {
@@ -77,13 +77,13 @@ describe("verifyDist", () => {
     await editIndex(distDir, (index) => {
       index.skills[1]!["description"] = "Something else.";
     });
-    expect(await verifyDist(distDir)).toEqual([`${INDEX}: placeholder-migration: SKILL.md description differs from the index`]);
+    expect(await verifyDist(distDir)).toEqual([`${INDEX}: udibo-placeholder-migration: SKILL.md description differs from the index`]);
   });
 
   test("rejects a missing artifact, a remote url and an unlisted file", async () => {
     await using dir = await tempDir();
     const distDir = await builtPlaceholders(dir.path);
-    await rm(path.join(distDir, ".well-known/agent-skills/placeholder-new-project/SKILL.md"));
+    await rm(path.join(distDir, ".well-known/agent-skills/udibo-placeholder-new-project/SKILL.md"));
     await writeFile(path.join(distDir, ".well-known/agent-skills/stray.md"), "stray");
     await editIndex(distDir, (index) => {
       index.skills[1]!["url"] = "https://cdn.example.com/SKILL.md";
@@ -91,8 +91,8 @@ describe("verifyDist", () => {
     const problems = await verifyDist(distDir);
     expect(problems).toEqual(
       expect.arrayContaining([
-        `${INDEX}: placeholder-migration: url https://cdn.example.com/SKILL.md is not a local path this check can verify`,
-        `${INDEX}: placeholder-new-project: artifact /.well-known/agent-skills/placeholder-new-project/SKILL.md does not exist`,
+        `${INDEX}: udibo-placeholder-migration: url https://cdn.example.com/SKILL.md is not a local path this check can verify`,
+        `${INDEX}: udibo-placeholder-new-project: artifact /.well-known/agent-skills/udibo-placeholder-new-project/SKILL.md does not exist`,
         ".well-known/agent-skills/stray.md: not produced by the build",
       ]),
     );
@@ -101,9 +101,9 @@ describe("verifyDist", () => {
   test("rejects a plugin copy that differs from the indexed artifact", async () => {
     await using dir = await tempDir();
     const distDir = await builtPlaceholders(dir.path);
-    await appendFile(path.join(distDir, "plugin-marketplace/plugins/udibo/skills/placeholder-new-project/SKILL.md"), "extra\n");
+    await appendFile(path.join(distDir, "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-new-project/SKILL.md"), "extra\n");
     expect(await verifyDist(distDir)).toEqual([
-      "plugin-marketplace/plugins/udibo/skills/placeholder-new-project/SKILL.md: differs from what the build produces",
+      "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-new-project/SKILL.md: differs from what the build produces",
     ]);
   });
 
@@ -125,7 +125,7 @@ describe("verifyDist allows only the files the build writes", () => {
     ["a hooks file in the plugin", "plugin-marketplace/plugins/udibo/hooks/hooks.json"],
     ["an MCP config in the plugin", "plugin-marketplace/plugins/udibo/.mcp.json"],
     ["a script at the root of dist", "evil.sh"],
-    ["an extra file inside a skill copy", "plugin-marketplace/plugins/udibo/skills/placeholder-migration/extra.md"],
+    ["an extra file inside a skill copy", "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-migration/extra.md"],
   ])("rejects %s", async (_label, file) => {
     await using dir = await tempDir();
     const distDir = await builtPlaceholders(dir.path);
@@ -157,7 +157,7 @@ describe("verifyDist allows only the files the build writes", () => {
       index.skills[1]!["name"] = "renamed-skill";
     });
     expect(await verifyDist(distDir)).toEqual(
-      expect.arrayContaining([`${INDEX}: renamed-skill: SKILL.md name "placeholder-migration" differs from the index`]),
+      expect.arrayContaining([`${INDEX}: renamed-skill: SKILL.md name "udibo-placeholder-migration" differs from the index`]),
     );
   });
 });
@@ -166,30 +166,30 @@ describe("check", () => {
   test("passes over the placeholder fixtures and this repository's workflows", async () => {
     await using dir = await tempDir();
     const problems = await check({
-      sources: { skillsDir: await copyPlaceholders(dir.path), rules: {} },
+      sources: { skillsDir: await copyPlaceholders(dir.path) },
       workflowsDir: path.join(REPOSITORY, ".github", "workflows"),
     });
     expect(problems).toEqual([]);
   });
 
   test("fails on the unsafe fixture with a message per finding", async () => {
-    const problems = await check({ sources: { skillsDir: path.join(FIXTURES, "unsafe-skills"), rules: {} } });
+    const problems = await check({ sources: { skillsDir: path.join(FIXTURES, "unsafe-skills") } });
     expect(problems).toEqual([
-      "unsafe-example/SKILL.md:11: [secret-in-conversation] asks for a secret to be handed over or shown; secrets stay in files or a secret store the agent never reads back",
-      "unsafe-example/SKILL.md:14: [unpinned-or-piped-code] pipes a download into an interpreter",
-      "unsafe-example/SKILL.md:15: [unpinned-or-piped-code] runs a package fetched at run time without an exact version: create-example-app",
-      "unsafe-example/SKILL.md:16: [secret-in-conversation] prints a secret-bearing variable into the session",
-      "unsafe-example/SKILL.md:19: [unpinned-or-piped-code] installs a package without an exact version: @udibo/oauth2",
-      "unsafe-example/SKILL.md:19: [unfenced-command] command `pnpm add @udibo/oauth2` is in inline code; put commands the agent runs in a fenced block",
+      "udibo-unsafe-example/SKILL.md:11: [secret-in-conversation] asks for a secret to be handed over or shown; secrets stay in files or a secret store the agent never reads back",
+      "udibo-unsafe-example/SKILL.md:14: [unpinned-or-piped-code] pipes a download into an interpreter",
+      "udibo-unsafe-example/SKILL.md:15: [unpinned-or-piped-code] runs a package fetched at run time without an exact version: create-example-app",
+      "udibo-unsafe-example/SKILL.md:16: [secret-in-conversation] prints a secret-bearing variable into the session",
+      "udibo-unsafe-example/SKILL.md:19: [unpinned-or-piped-code] installs a package without an exact version: @udibo/oauth2",
+      "udibo-unsafe-example/SKILL.md:19: [unfenced-command] command `pnpm add @udibo/oauth2` is in inline code; put commands the agent runs in a fenced block",
     ]);
   });
 
   test("verifies an existing build when given one", async () => {
     await using dir = await tempDir();
     const distDir = await builtPlaceholders(dir.path);
-    await appendFile(path.join(distDir, ".well-known/agent-skills/placeholder-migration/SKILL.md"), "x");
+    await appendFile(path.join(distDir, ".well-known/agent-skills/udibo-placeholder-migration/SKILL.md"), "x");
     const problems = await check({ sources: { skillsDir: path.join(dir.path, "empty") }, distDir });
-    expect(problems.join("\n")).toMatch(/^dist: .*placeholder-migration: digest/);
+    expect(problems.join("\n")).toMatch(/^dist: .*udibo-placeholder-migration: digest/);
   });
 });
 
@@ -224,6 +224,8 @@ describe("main", () => {
     await mkdir(path.join(root, "skills"));
     await writeFile(path.join(root, "external-skills.json"), '{ "skills": [] }\n');
     await cp(path.join(REPOSITORY, ".github"), path.join(root, ".github"), { recursive: true });
+    await cp(path.join(REPOSITORY, "package.json"), path.join(root, "package.json"));
+    await cp(path.join(REPOSITORY, "LICENSE"), path.join(root, "LICENSE"));
   }
 
   test("passes on a clean checkout and verifies --dist", async () => {
@@ -243,6 +245,15 @@ describe("main", () => {
     expect(await main([], dir.path)).toBe(1);
     expect(error).toHaveBeenCalledWith("ci.yml: names a self-hosted runner");
     expect(error).toHaveBeenCalledWith("1 problem(s) found.");
+  });
+
+  test("fails when the LICENSE file is missing", async () => {
+    await using dir = await tempDir();
+    await checkout(dir.path);
+    await rm(path.join(dir.path, "LICENSE"));
+    using error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await main([], dir.path)).toBe(1);
+    expect(error).toHaveBeenCalledWith("LICENSE: file is missing");
   });
 
   test("rejects --dist without a directory", async () => {

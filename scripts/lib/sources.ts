@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { compare, loadSkill, NAME_PATTERN, SEMVER_PATTERN } from "./skill.ts";
-import type { Issue, Skill, SkillRules } from "./skill.ts";
+import type { Issue, Skill } from "./skill.ts";
 
 export type ExternalPin = {
   name: string;
@@ -19,10 +19,7 @@ export type SourceOptions = {
   skillsDir: string;
   externalFile?: string;
   externalCacheDir?: string;
-  rules?: SkillRules;
 };
-
-export const PUBLISHED_RULES: SkillRules = { namePrefix: "udibo-" };
 
 const PACKAGE_NAME = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
 const SRI_SHA512 = /^sha512-[A-Za-z0-9+/]{86}==$/;
@@ -67,7 +64,6 @@ export async function readExternalPins(file: string): Promise<ExternalPin[]> {
  * equal that version and its targets must name the package.
  */
 export async function collectSources(options: SourceOptions): Promise<Sources> {
-  const rules = options.rules ?? PUBLISHED_RULES;
   const skills: Skill[] = [];
   const issues: SourceIssue[] = [];
   const add = (skill: string, items: Issue[]): void => {
@@ -75,7 +71,7 @@ export async function collectSources(options: SourceOptions): Promise<Sources> {
   };
 
   for (const name of await skillDirectories(options.skillsDir)) {
-    const result = await loadSkill(path.join(options.skillsDir, name), rules);
+    const result = await loadSkill(path.join(options.skillsDir, name));
     add(name, result.issues);
     if (result.skill) skills.push(result.skill);
   }
@@ -95,7 +91,7 @@ export async function collectSources(options: SourceOptions): Promise<Sources> {
         add(pin.name, [{ file: "external-skills.json", message: "not fetched at its pinned version; run node scripts/fetch-external.ts" }]);
         continue;
       }
-      const result = await loadSkill(path.join(cache, pin.name), rules);
+      const result = await loadSkill(path.join(cache, pin.name));
       add(pin.name, result.issues);
       if (!result.skill) continue;
       if (result.skill.version !== pin.version) {

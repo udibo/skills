@@ -1,5 +1,5 @@
 ---
-name: placeholder-migration
+name: udibo-placeholder-migration
 description: Placeholder used only by this repository's tests. It stands in for a skill that migrates a project from another provider, and it is not guidance.
 metadata:
   version: "0.0.0"

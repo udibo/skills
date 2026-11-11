@@ -5,12 +5,14 @@ import { fileURLToPath } from "node:url";
 
 import { build, formatIssue, repositorySources } from "./build.ts";
 import type { SourceOptions } from "./lib/sources.ts";
+import { licenceProblems } from "./lib/release.ts";
 import { verifyDist } from "./lib/verify.ts";
 import { checkWorkflows } from "./lib/workflows.ts";
 
 export type CheckOptions = {
   sources: SourceOptions;
   workflowsDir?: string;
+  root?: string;
   distDir?: string;
 };
 
@@ -18,7 +20,7 @@ export type CheckOptions = {
  * Runs every repository check and returns one message per problem: source
  * skills against the specification, conventions and safety rules; two builds
  * into temporary directories that must be byte-identical and must verify; the
- * CI workflows; and, when `distDir` is given, an existing build.
+ * CI workflows; the licence files, when `root` is given; and, when `distDir` is given, an existing build.
  */
 export async function check(options: CheckOptions): Promise<string[]> {
   const problems: string[] = [];
@@ -36,6 +38,7 @@ export async function check(options: CheckOptions): Promise<string[]> {
     await rm(scratch, { recursive: true, force: true });
   }
   if (options.workflowsDir !== undefined) problems.push(...(await checkWorkflows(options.workflowsDir)));
+  if (options.root !== undefined) problems.push(...(await licenceProblems(options.root)));
   if (options.distDir !== undefined) {
     problems.push(...(await verifyDist(options.distDir)).map((problem) => `dist: ${problem}`));
   }
@@ -64,6 +67,7 @@ export async function main(argv: string[] = process.argv.slice(2), root: string 
   const problems = await check({
     sources: repositorySources(root),
     workflowsDir: path.join(root, ".github", "workflows"),
+    root,
     ...(distArg === undefined ? {} : { distDir: path.resolve(root, distArg) }),
   });
   if (problems.length > 0) {

@@ -20,9 +20,8 @@ export type Skill = {
 
 export type SkillResult = { skill?: Skill; issues: Issue[] };
 
-export type SkillRules = {
-  namePrefix?: string;
-};
+export const NAME_PREFIX = "udibo-";
+export const LICENSE = "MIT";
 
 export const NAME_PATTERN: RegExp = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 export const SEMVER_PATTERN: RegExp =
@@ -53,10 +52,11 @@ export function parseTargets(value: string): Target[] {
 
 /**
  * Loads one skill directory and checks it against the Agent Skills
- * specification, this repository's conventions and the safety rules.
+ * specification, this repository's conventions (the `udibo-` name prefix and
+ * the repository licence) and the safety rules.
  * Returns the skill only when there are no issues.
  */
-export async function loadSkill(dir: string, rules: SkillRules = {}): Promise<SkillResult> {
+export async function loadSkill(dir: string): Promise<SkillResult> {
   const issues: Issue[] = [];
   const dirName = path.basename(dir);
   const files = await listFiles(dir, issues);
@@ -106,8 +106,8 @@ export async function loadSkill(dir: string, rules: SkillRules = {}): Promise<Sk
       fail(`name "${name}" must be lowercase letters, digits and single hyphens, not starting or ending with a hyphen`);
     }
     if (name !== dirName) fail(`name "${name}" must equal its directory name "${dirName}"`);
-    if (rules.namePrefix !== undefined && !name.startsWith(rules.namePrefix)) {
-      fail(`name "${name}" must start with "${rules.namePrefix}"`);
+    if (!name.startsWith(NAME_PREFIX)) {
+      fail(`name "${name}" must start with "${NAME_PREFIX}"; rename the skill and its directory to "${NAME_PREFIX}${name}"`);
     }
   }
   const description = data["description"];
@@ -116,7 +116,9 @@ export async function loadSkill(dir: string, rules: SkillRules = {}): Promise<Sk
   } else if (description.length > 1024) {
     fail(`description is ${description.length} characters; the maximum is 1024`);
   }
-  if ("license" in data && typeof data["license"] !== "string") fail("license must be a string");
+  if ("license" in data && data["license"] !== LICENSE) {
+    fail(`license must be "${LICENSE}", the licence of this repository, when present`);
+  }
   if ("compatibility" in data) {
     const compatibility = data["compatibility"];
     if (typeof compatibility !== "string" || compatibility.length === 0 || compatibility.length > 500) {

@@ -1,5 +1,5 @@
 ---
-name: placeholder-new-project
+name: udibo-placeholder-new-project
 description: Placeholder used only by this repository's tests. It stands in for a skill that starts a new project, and it is not guidance.
 metadata:
   version: "0.0.0"
