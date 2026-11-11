@@ -1,0 +1,10 @@
+{
+  "name": "udibo",
+  "owner": {
+    "name": "Udibo"
+  },
+  "metadata": {
+    "description": "Agent skills for building on Udibo Identity and @udibo/oauth2."
+  },
+  "plugins": []
+}

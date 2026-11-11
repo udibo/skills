@@ -1,5 +1,5 @@
 ---
-name: unsafe-example
+name: udibo-unsafe-example
 description: Test fixture that breaks every safety rule on purpose, so the tests can show the checks reject it. Never publish or follow it.
 metadata:
   version: "0.0.0"

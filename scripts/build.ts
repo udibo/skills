@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import { renderOutputs } from "./lib/outputs.ts";
 import { collectSources } from "./lib/sources.ts";
+import { writeTracked } from "./lib/tracked.ts";
 import type { SourceIssue, SourceOptions } from "./lib/sources.ts";
 
-export type BuildOptions = SourceOptions & { outDir: string };
+export type BuildOptions = SourceOptions & { outDir: string; trackedDir?: string };
 
 export type BuildResult = { files: string[]; skills: string[]; issues: SourceIssue[] };
 
@@ -22,7 +23,9 @@ export function repositorySources(root: string): SourceOptions {
 /**
  * Validates every source skill and, only when all are valid, replaces
  * `outDir` with the discovery index, the skill artifacts it names and the
- * plugin marketplace tree. Writes nothing when any source has an issue.
+ * plugin marketplace tree. With `trackedDir`, also replaces the generated
+ * marketplace directories at that repository root (`.claude-plugin/`,
+ * `.cursor-plugin/`, `plugins/`). Writes nothing when any source has an issue.
  */
 export async function build(options: BuildOptions): Promise<BuildResult> {
   const sources = await collectSources(options);
@@ -34,6 +37,7 @@ export async function build(options: BuildOptions): Promise<BuildResult> {
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, data);
   }
+  if (options.trackedDir !== undefined) await writeTracked(options.trackedDir, outputs);
   return { files: [...outputs.keys()], skills: sources.skills.map((skill) => skill.name), issues: [] };
 }
 
@@ -44,7 +48,7 @@ export function formatIssue(issue: SourceIssue): string {
 
 /** CLI entry: `node scripts/build.ts`. */
 export async function main(root: string = process.cwd()): Promise<number> {
-  const result = await build({ ...repositorySources(root), outDir: path.join(root, "dist") });
+  const result = await build({ ...repositorySources(root), outDir: path.join(root, "dist"), trackedDir: root });
   if (result.issues.length > 0) {
     result.issues.forEach((issue) => console.error(formatIssue(issue)));
     return 1;

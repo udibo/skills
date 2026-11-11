@@ -69,8 +69,14 @@ The rules `scripts/check.ts` enforces:
   for the agent.
 - **Name.** 1 to 64 lowercase letters, digits and single hyphens, not starting
   or ending with a hyphen, equal to the directory name, and starting with
-  `udibo-`. A package's skill is named after the package (`udibo-oauth2`); a
-  service skill is named for its job (`udibo-identity-new-project`).
+  `udibo-`. Every skill carries the prefix, so its name can't collide with
+  another publisher's in an agent's skill list. A name without it is rejected
+  with the name to use instead (`name "foo" must start with "udibo-"; rename
+  the skill and its directory to "udibo-foo"`). A package's skill is named
+  after the package (`udibo-oauth2`); a service skill is named for its job
+  (`udibo-identity-new-project`).
+- **Licence.** Skills are published under this repository's [MIT licence](LICENSE).
+  `license` is optional in the frontmatter; when present it must be `MIT`.
 - **Description.** 1 to 1024 characters; `compatibility`, if present, 1 to 500.
 - **Version.** `metadata.version` is a semantic version. A package's skill
   carries the package's version, and the build rejects it when the two differ.
@@ -218,6 +224,15 @@ from the pinned version, or when its `targets` don't name the package.
 Updating the skill means changing the pin, in a pull request like any other
 change. No package is pinned yet.
 
+### Generated marketplace tree
+
+`.claude-plugin/`, `.cursor-plugin/` and `plugins/` at the repository root are
+build output, committed so a tag carries a ready marketplace. Never edit them by
+hand. After changing a skill, run `pnpm build` and commit the result;
+`pnpm check` fails, naming that command, when the committed tree differs from
+what the build produces. They are marked `linguist-generated` in
+`.gitattributes`.
+
 ## Build and checks
 
 You need Node 26 (see `.nvmrc`) and the pnpm version in `package.json`.
@@ -239,8 +254,11 @@ pnpm build
   and no other file anywhere under the output. It also checks the CI workflows.
 - `pnpm build` writes `dist/`: the index and artifacts under
   `.well-known/agent-skills/`, and the plugin marketplace tree under
-  `plugin-marketplace/`. With no skills it writes an index whose `skills` array
+  `plugin-marketplace/`. It also regenerates the committed marketplace tree at
+  the repository root from the same output. With no skills it writes an index whose `skills` array
   is empty.
+  It also requires `package.json` and `LICENSE` to agree on the MIT licence
+  and the committed marketplace tree to match the build byte for byte.
 - `node scripts/check.ts --dist dist` also verifies an existing build.
 - `pnpm test` runs the tests, which build the fixtures under `test/fixtures/`.
 
@@ -262,6 +280,43 @@ written with sorted entries, zero timestamps and fixed ownership.
     permissions other than that;
   - uses an action not pinned to a full commit SHA.
 
+## Releasing
+
+A version is published by a git tag, `vX.Y.Z`, never by a release branch.
+
+1. In a pull request, set `version` in `package.json` to the new `X.Y.Z` and
+   merge it to `main` as usual.
+2. Tag the merge commit and push the tag:
+
+   ```sh
+   git tag vX.Y.Z <merge-commit>
+   git push origin vX.Y.Z
+   ```
+
+3. The CI workflow runs on the tag. Before the usual check, test and build, it
+   fails the run unless the tag is `v` plus exactly the `package.json` version
+   (`node scripts/check-release.ts`) and the tagged commit is on `main`.
+
+Neither marketplace manifest carries its own version, so the tag is the
+version of a release.
+
+### Installing a release
+
+Claude Code accepts a `#<ref>` suffix on a marketplace, and a tag is a ref.
+The marketplace is committed at the repository root (see
+[Generated marketplace tree](#generated-marketplace-tree)), so a tag carries it.
+Pinning to a release looks like this:
+
+```sh
+claude plugin marketplace add udibo/skills#vX.Y.Z
+claude plugin install udibo@udibo
+```
+
+Verified locally with the Claude Code CLI: `claude plugin validate` passes on
+the committed tree, and adding the repository by local path and running
+`claude plugin install udibo@udibo` installs the plugin. Not verified until a
+first tag exists: adding the marketplace from GitHub with a `#vX.Y.Z` suffix.
+
 ## Licence
 
-Licence to be added with the first published skill.
+[MIT](LICENSE), copyright 2026 Udibo.

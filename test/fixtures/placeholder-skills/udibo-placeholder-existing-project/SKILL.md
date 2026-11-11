@@ -1,7 +1,7 @@
 ---
-name: placeholder-existing-project
+name: udibo-placeholder-existing-project
 description: Placeholder used only by this repository's tests. It stands in for a skill that adds Udibo to an existing project, and it is not guidance.
-license: Licence to be added with the first published skill
+license: MIT
 compatibility: Test fixture only
 metadata:
   version: "0.0.0"

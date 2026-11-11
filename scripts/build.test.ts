@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test, vi } from "vitest";
@@ -8,7 +8,6 @@ import { build, main } from "./build.ts";
 import { readTarGz } from "./lib/tar.ts";
 import { copyPlaceholders, skillMd, tempDir, writeSkill } from "./lib/testing.ts";
 
-const NO_PREFIX = { rules: {} };
 
 async function filesUnder(dir: string, prefix = ""): Promise<string[]> {
   const entries = await readdir(path.join(dir, prefix), { withFileTypes: true });
@@ -44,13 +43,13 @@ test("emits a valid index with an empty skills array when no skill is publishabl
 test("indexes each skill with the digest of the exact bytes served", async () => {
   await using dir = await tempDir();
   const outDir = path.join(dir.path, "dist");
-  const result = await build({ skillsDir: await copyPlaceholders(dir.path), outDir, ...NO_PREFIX });
+  const result = await build({ skillsDir: await copyPlaceholders(dir.path), outDir });
   expect(result.issues).toEqual([]);
   const index = JSON.parse(await readFile(path.join(outDir, ".well-known/agent-skills/index.json"), "utf8"));
   expect(index.skills.map((entry: { name: string; type: string; url: string }) => [entry.name, entry.type, entry.url])).toEqual([
-    ["placeholder-existing-project", "archive", "/.well-known/agent-skills/placeholder-existing-project.tar.gz"],
-    ["placeholder-migration", "skill-md", "/.well-known/agent-skills/placeholder-migration/SKILL.md"],
-    ["placeholder-new-project", "skill-md", "/.well-known/agent-skills/placeholder-new-project/SKILL.md"],
+    ["udibo-placeholder-existing-project", "archive", "/.well-known/agent-skills/udibo-placeholder-existing-project.tar.gz"],
+    ["udibo-placeholder-migration", "skill-md", "/.well-known/agent-skills/udibo-placeholder-migration/SKILL.md"],
+    ["udibo-placeholder-new-project", "skill-md", "/.well-known/agent-skills/udibo-placeholder-new-project/SKILL.md"],
   ]);
   for (const entry of index.skills) {
     const served = await readFile(path.join(outDir, entry.url));
@@ -61,25 +60,25 @@ test("indexes each skill with the digest of the exact bytes served", async () =>
 test("serves a skill with reference files as an archive with SKILL.md at its root", async () => {
   await using dir = await tempDir();
   const outDir = path.join(dir.path, "dist");
-  await build({ skillsDir: await copyPlaceholders(dir.path), outDir, ...NO_PREFIX });
-  const archive = await readFile(path.join(outDir, ".well-known/agent-skills/placeholder-existing-project.tar.gz"));
+  await build({ skillsDir: await copyPlaceholders(dir.path), outDir });
+  const archive = await readFile(path.join(outDir, ".well-known/agent-skills/udibo-placeholder-existing-project.tar.gz"));
   expect(readTarGz(archive).map((entry) => entry.path)).toEqual(["SKILL.md", "references/notes.md"]);
 });
 
 test("copies every skill into the plugin marketplace tree with its manifests", async () => {
   await using dir = await tempDir();
   const outDir = path.join(dir.path, "dist");
-  await build({ skillsDir: await copyPlaceholders(dir.path), outDir, ...NO_PREFIX });
+  await build({ skillsDir: await copyPlaceholders(dir.path), outDir });
   expect((await filesUnder(outDir)).filter((file) => file.startsWith("plugin-marketplace/"))).toEqual([
     "plugin-marketplace/.claude-plugin/marketplace.json",
     "plugin-marketplace/.cursor-plugin/marketplace.json",
     "plugin-marketplace/plugins/udibo/.claude-plugin/plugin.json",
     "plugin-marketplace/plugins/udibo/.codex-plugin/plugin.json",
     "plugin-marketplace/plugins/udibo/.cursor-plugin/plugin.json",
-    "plugin-marketplace/plugins/udibo/skills/placeholder-existing-project/SKILL.md",
-    "plugin-marketplace/plugins/udibo/skills/placeholder-existing-project/references/notes.md",
-    "plugin-marketplace/plugins/udibo/skills/placeholder-migration/SKILL.md",
-    "plugin-marketplace/plugins/udibo/skills/placeholder-new-project/SKILL.md",
+    "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-existing-project/SKILL.md",
+    "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-existing-project/references/notes.md",
+    "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-migration/SKILL.md",
+    "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-new-project/SKILL.md",
   ]);
   const claude = JSON.parse(await readFile(path.join(outDir, "plugin-marketplace/.claude-plugin/marketplace.json"), "utf8"));
   expect(claude.plugins).toEqual([expect.objectContaining({ name: "udibo", source: "./plugins/udibo" })]);
@@ -88,8 +87,8 @@ test("copies every skill into the plugin marketplace tree with its manifests", a
 test("produces byte-identical output from the same input", async () => {
   await using dir = await tempDir();
   const skillsDir = await copyPlaceholders(dir.path);
-  await build({ skillsDir, outDir: path.join(dir.path, "a"), ...NO_PREFIX });
-  await build({ skillsDir, outDir: path.join(dir.path, "b"), ...NO_PREFIX });
+  await build({ skillsDir, outDir: path.join(dir.path, "a") });
+  await build({ skillsDir, outDir: path.join(dir.path, "b") });
   const files = await filesUnder(path.join(dir.path, "a"));
   expect(await filesUnder(path.join(dir.path, "b"))).toEqual(files);
   for (const file of files) {
@@ -111,13 +110,13 @@ test("writes nothing and keeps the previous output when a source has an issue", 
   expect(await readFile(path.join(outDir, "previous.txt"), "utf8")).toBe("kept");
 });
 
-test("requires the udibo- prefix on published skills by default", async () => {
+test("refuses to build a skill whose name lacks the udibo- prefix", async () => {
   await using dir = await tempDir();
-  const result = await build({ skillsDir: await copyPlaceholders(dir.path), outDir: path.join(dir.path, "dist") });
+  const skillsDir = path.join(dir.path, "skills");
+  await writeSkill(skillsDir, "placeholder-bare", { "SKILL.md": skillMd("placeholder-bare") });
+  const result = await build({ skillsDir, outDir: path.join(dir.path, "dist") });
   expect(result.issues.map((issue) => issue.message)).toEqual([
-    'name "placeholder-existing-project" must start with "udibo-"',
-    'name "placeholder-migration" must start with "udibo-"',
-    'name "placeholder-new-project" must start with "udibo-"',
+    'name "placeholder-bare" must start with "udibo-"; rename the skill and its directory to "udibo-placeholder-bare"',
   ]);
 });
 
@@ -131,4 +130,17 @@ test("the CLI builds a repository checkout and fails with each issue printed", a
   await writeSkill(path.join(dir.path, "skills"), "udibo-broken", { "SKILL.md": "# no frontmatter\n" });
   expect(await main(dir.path)).toBe(1);
   expect(error).toHaveBeenCalledWith("udibo-broken/SKILL.md: SKILL.md must start with a '---' line opening the YAML frontmatter");
+});
+
+test("writes the marketplace into the tracked tree at the repository root, plugin sources resolving there", async () => {
+  await using dir = await tempDir();
+  const skillsDir = await copyPlaceholders(dir.path);
+  await build({ skillsDir, outDir: path.join(dir.path, "dist"), trackedDir: dir.path });
+  const claude = JSON.parse(await readFile(path.join(dir.path, ".claude-plugin/marketplace.json"), "utf8"));
+  expect(claude.plugins[0].source).toBe("./plugins/udibo");
+  expect(await readFile(path.join(dir.path, "plugins/udibo/.claude-plugin/plugin.json"), "utf8")).toContain('"name": "udibo"');
+  expect(await readFile(path.join(dir.path, "plugins/udibo/skills/udibo-placeholder-migration/SKILL.md"), "utf8")).toContain("name: udibo-placeholder-migration");
+  await rm(path.join(dir.path, "skills"), { recursive: true });
+  await build({ skillsDir, outDir: path.join(dir.path, "dist"), trackedDir: dir.path });
+  expect(JSON.parse(await readFile(path.join(dir.path, ".claude-plugin/marketplace.json"), "utf8")).plugins).toEqual([]);
 });
