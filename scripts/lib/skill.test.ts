@@ -247,7 +247,7 @@ describe("safety rules run on every Markdown file", () => {
     const result = await loadSkill(path.join(FIXTURES, "unsafe-skills", "udibo-unsafe-example"));
     const rulesHit = new Set(result.issues.map((issue) => /^\[([a-z-]+)\]/.exec(issue.message)?.[1]));
     expect(result.skill).toBeUndefined();
-    expect([...rulesHit].sort()).toEqual(["secret-in-conversation", "unfenced-command", "unpinned-or-piped-code"]);
+    expect([...rulesHit].sort()).toEqual(["secret-in-conversation", "secret-literal", "unfenced-command", "unpinned-or-piped-code"]);
   });
 });
 

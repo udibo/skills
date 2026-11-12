@@ -181,6 +181,7 @@ describe("check", () => {
       "udibo-unsafe-example/SKILL.md:16: [secret-in-conversation] prints a secret-bearing variable into the session",
       "udibo-unsafe-example/SKILL.md:19: [unpinned-or-piped-code] installs a package without an exact version: @udibo/oauth2",
       "udibo-unsafe-example/SKILL.md:19: [unfenced-command] command `pnpm add @udibo/oauth2` is in inline code; put commands the agent runs in a fenced block",
+      "udibo-unsafe-example/SKILL.md:24: [secret-literal] gives AUTH_CLIENT_SECRET a literal value; leave it empty for the person to fill in their env file",
     ]);
   });
 

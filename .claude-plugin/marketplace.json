@@ -5,5 +5,11 @@
     "name": "Udibo",
     "url": "https://github.com/udibo"
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "udibo",
+      "source": "./plugins/udibo",
+      "description": "Skills that guide a coding agent through adding Udibo Identity and @udibo/oauth2 to a project."
+    }
+  ]
 }

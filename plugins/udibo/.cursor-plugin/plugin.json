@@ -1,0 +1,8 @@
+{
+  "name": "udibo",
+  "description": "Skills that guide a coding agent through adding Udibo Identity and @udibo/oauth2 to a project.",
+  "author": {
+    "name": "Udibo"
+  },
+  "repository": "https://github.com/udibo/skills"
+}

@@ -5,6 +5,7 @@ export type SafetyRule =
   | "unpinned-or-piped-code"
   | "unfenced-command"
   | "hidden-content"
+  | "secret-literal"
   | "too-long-to-check";
 
 export type SafetyFinding = { rule: SafetyRule; line: number; message: string };
@@ -51,6 +52,32 @@ const FILE_READER = new Set([
   "select-string", "sls", "source", ".",
 ]);
 
+const CREDENTIAL_FORMATS: { pattern: RegExp; label: string }[] = [
+  { pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/, label: "a private key block" },
+  { pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, label: "an AWS access key ID" },
+  { pattern: /\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{22,}/, label: "a GitHub token" },
+  { pattern: /\bxox[abposr]-[A-Za-z0-9-]{10,}/, label: "a Slack token" },
+  { pattern: /\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}/, label: "a payment API key" },
+  { pattern: /\bAIza[0-9A-Za-z_-]{35}\b/, label: "a Google API key" },
+  { pattern: /\bnpm_[A-Za-z0-9]{36}\b/, label: "an npm token" },
+  { pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/, label: "a JSON Web Token" },
+  { pattern: /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]{20,}=*/, label: "an HTTP authorization credential" },
+];
+const URL_CREDENTIALS = /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"`]+:([^\s/@'"`]+)@/gi;
+const SECRET_KEY_NAME = /secret|token|passw(?:or)?d|passphrase|api[-_]?key|private[-_]?key|access[-_]?key|credential/i;
+const NOT_SECRET_NAME = /public|publishable/i;
+const SECRET_WORDS = new Set(["pass", "pwd", "key"]);
+const KEY_DESCRIBER = new Set(["file", "path", "dir", "id", "name", "env", "var", "type", "format", "length", "size", "primary", "foreign", "sort", "partition"]);
+const DATA_LANGUAGES = new Set(["", "yaml", "yml", "ini", "toml", "env", "dotenv", "properties", "conf", "cfg", "text", "txt", "plaintext"]);
+const UNQUOTED_DATA_ASSIGNMENT = /^\s*(?:-\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*:\s+([^\s#'"`{}[\](),;]+)\s*(?:#.*)?$/;
+const PROPERTY_PATH = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
+const SECRET_FLAG = /(?:^|\s)--([a-z0-9][a-z0-9-]*)(?:=|\s+)(?!-)("[^"]*"|'[^']*'|\S+)/gi;
+const FALLBACK = /([A-Za-z_$][\w$]*)["'`]?\]?\s*(?:\?\?|\|\|)\s*(["'`])((?:(?!\2).)*)\2/g;
+const KEY_BEFORE_COLON = /([A-Za-z_$][\w$]*)["']?\s*$/;
+const ENV_ASSIGNMENT = /^\s*(?:export\s+|set\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/;
+const QUOTED_ASSIGNMENT = /["']?([A-Za-z_][A-Za-z0-9_-]*)["']?\s*[:=]\s*(["'`])((?:(?!\2).)*)\2/g;
+const PLACEHOLDER = /^(?:|<[^<>]+>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\{\{[^{}]+\}\}|x{3,}|X{3,}|\*{3,}|\.{3}|…|(?:your|my)[-_][\w-]+|change[-_]?me|replace[-_]?me)$/i;
+
 const DOWNLOADER = "(?:curl|wget|fetch|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|http|https|xh|aria2c)";
 const INTERPRETER =
   "(?:sh|bash|zsh|dash|ksh|mksh|fish|ash|python[0-9.]*|py|node|nodejs|deno|bun|ruby|perl|php|lua|pwsh|powershell|iex|Invoke-Expression|cmd|source|\\.)";
@@ -76,7 +103,8 @@ const REMOTE_SPEC = /^(?:git\+|git:|https?:|ssh:|github:|gitlab:|bitbucket:|[\w.
 const COMMIT_PINNED = /#[0-9a-f]{40}$/;
 const VALUE_FLAGS = new Set([
   "-C", "--dir", "--prefix", "--filter", "-F", "--workspace", "--cwd", "--tag", "--registry", "--cache", "--userconfig",
-  "--package", "-p", "--from", "--with", "--python", "--index-url", "--spec",
+  "--package", "-p", "--from", "--with", "--python", "--index-url", "--spec", "-i", "--extra-index-url", "-r", "--requirement",
+  "-c", "--constraint", "-e", "--editable", "-t", "--target",
 ]);
 const SKIPPED_WORDS = new Set(["workspace", "global"]);
 
@@ -86,7 +114,14 @@ const MANAGERS: Record<string, Tool> = {
   pnpm: { runner: ["dlx"], creator: ["create", "init"], installer: ["add", "install", "i"] },
   yarn: { runner: ["dlx"], creator: ["create", "init"], installer: ["add"] },
   bun: { runner: ["x"], creator: ["create", "init"], installer: ["add", "install", "i", "a"] },
+  pip: { runner: [], creator: [], installer: ["install"] },
+  pip3: { runner: [], creator: [], installer: ["install"] },
+  uv: { runner: [], creator: [], installer: ["add"] },
 };
+const PYTHON_MANAGERS = new Set(["pip", "pip3", "uv"]);
+const REGISTRY_OVERRIDE = /(?:^|\s)(?:--registry|--index-url|--extra-index-url|-i)(?:=|\s+)\S|\bnpm_config_registry=|\bUV_INDEX_URL=|\bPIP_INDEX_URL=/i;
+const INLINE_SCRIPT = /(?:^|[\s;&|(])(?:node|nodejs|deno|bun|python[0-9.]*|ruby|perl|php)(?:\s+\S+)*?\s+(?:-e|-p|-c|-r|--eval|--print)(?:\s|=|$)/i;
+const DOWNLOAD_OUTPUT = /(?:\s(?:-o|-O|--output|--output-document|-OutFile)(?:\s+|=)|\s>{1,2}\s*)(["']?)([^\s"'|;&]+)\1/gi;
 const DIRECT_RUNNERS = new Set(["npx", "bunx", "pnpx", "uvx"]);
 
 const COMMAND_WORDS =
@@ -151,6 +186,7 @@ export function checkSafety(text: string, options: { markdown?: boolean } = {}):
   const checkProse = prose.filter(fits);
   const checkCode = joinContinuations(code).filter((command) => !tooLong(command));
   const proseParagraphs = paragraphs(checkProse).filter((paragraph) => !tooLong(paragraph));
+  downloadThenRunFindings(checkCode).forEach(({ line, message }) => add("unpinned-or-piped-code", line, message));
   for (const command of [...checkCode, ...checkSpans, ...checkProse]) {
     secretCommandFindings(command.text).forEach((message) => add("secret-in-conversation", command.line, message));
     unpinnedCodeFindings(command.text).forEach((message) => add("unpinned-or-piped-code", command.line, message));
@@ -164,6 +200,21 @@ export function checkSafety(text: string, options: { markdown?: boolean } = {}):
     for (const message of unpinnedCodeFindings(paragraph.text)) {
       if (!already("unpinned-or-piped-code", message)) add("unpinned-or-piped-code", paragraph.line, message);
     }
+  }
+
+  let fenceLanguage: string | undefined;
+  for (const entry of lines) {
+    if (markdown && entry.kind === "fence-delimiter") {
+      fenceLanguage = fenceLanguage === undefined ? (entry.text.trim().replace(/^(`{3,}|~{3,})/, "").trim().split(/\s+/)[0] ?? "").toLowerCase() : undefined;
+      continue;
+    }
+    const isCode = !markdown || entry.kind === "code";
+    const language = markdown ? (fenceLanguage ?? "") : "";
+    const findingsHere = new Set<string>();
+    if (entry.text.length <= MAX_JOINED_BYTES) for (const message of credentialFormatFindings(entry.text)) findingsHere.add(message);
+    const texts = isCode ? [entry.text] : inlineCodeSpans(entry.text);
+    for (const text of texts) for (const message of secretAssignmentFindings(text, isCode && DATA_LANGUAGES.has(language))) findingsHere.add(message);
+    findingsHere.forEach((message) => add("secret-literal", entry.line, message));
   }
 
   if (!markdown) return sortFindings(findings);
@@ -192,6 +243,83 @@ export function checkSafety(text: string, options: { markdown?: boolean } = {}):
     }
   }
   return sortFindings(findings);
+}
+
+function downloadThenRunFindings(commands: Candidate[]): { line: number; message: string }[] {
+  const found: { line: number; message: string }[] = [];
+  const downloaded = new Set<string>();
+  for (const command of commands) {
+    for (const piece of command.text.split(/\|\||&&|;|\n/)) {
+      if (DOWNLOAD_COMMAND.test(piece) || new RegExp(`\\b${DOWNLOADER}\\b`, "i").test(piece.trim().split(/\s+/)[0] ?? "")) {
+        for (const match of piece.matchAll(DOWNLOAD_OUTPUT)) downloaded.add(scriptName(match[2] ?? ""));
+        const url = /https?:\/\/\S+/.exec(piece)?.[0];
+        if (url !== undefined && !/\s(?:-o|-O|--output|-OutFile)\b|>/.test(piece)) downloaded.add(scriptName(url.split(/[?#]/)[0]?.split("/").pop() ?? ""));
+        continue;
+      }
+      const tokens = piece.trim().split(/\s+/).map((token) => token.replace(/^["']|["']$/g, ""));
+      const runs = tokens.some((token, index) => {
+        const name = scriptName(token);
+        if (!downloaded.has(name) || name === "") return false;
+        const before = toolName(tokens[index - 1] ?? "");
+        return index === 0 || new RegExp(`^${INTERPRETER}$`, "i").test(before) || before === "+x" || before === "chmod";
+      });
+      if (runs) found.push({ line: command.line, message: "runs a script it downloaded" });
+    }
+  }
+  return found;
+}
+
+function scriptName(token: string): string {
+  return token.replace(/^\.\//, "").replace(/^["']|["']$/g, "");
+}
+
+function credentialFormatFindings(text: string): string[] {
+  const messages = CREDENTIAL_FORMATS.filter(({ pattern }) => pattern.test(text)).map(
+    ({ label }) => `contains what looks like ${label}; a skill carries no credential, real or example`,
+  );
+  for (const match of text.matchAll(URL_CREDENTIALS)) {
+    if (!PLACEHOLDER.test(match[1] ?? "")) messages.push("contains a URL with a password in it; leave the password for the person to put in an env file");
+  }
+  return messages;
+}
+
+function secretAssignmentFindings(text: string, dataFile: boolean): string[] {
+  if (text.length > MAX_JOINED_BYTES) return [];
+  const assigned: { name: string; value: string }[] = [];
+  const env = ENV_ASSIGNMENT.exec(text);
+  if (env) assigned.push({ name: env[1] ?? "", value: (env[2] ?? "").replace(/^(["'])(.*)\1$/, "$2") });
+  for (const match of text.matchAll(QUOTED_ASSIGNMENT)) assigned.push({ name: match[1] ?? "", value: match[3] ?? "" });
+  const data = dataFile ? UNQUOTED_DATA_ASSIGNMENT.exec(text) : null;
+  if (data && !PROPERTY_PATH.test(data[2] ?? "")) assigned.push({ name: data[1] ?? "", value: data[2] ?? "" });
+  if (text.includes("--")) {
+    for (const match of text.matchAll(SECRET_FLAG)) assigned.push({ name: match[1] ?? "", value: (match[2] ?? "").replace(/^(["'])(.*)\1$/, "$2") });
+  }
+  if (text.includes("??") || text.includes("||")) {
+    for (const match of text.matchAll(FALLBACK)) {
+      const key = propertyKeyBefore(text.slice(0, match.index));
+      const name = [key, match[1]].find((candidate) => candidate !== undefined && isSecretName(candidate));
+      if (name !== undefined) assigned.push({ name, value: match[3] ?? "" });
+    }
+  }
+  const names = assigned.filter(({ name, value }) => isSecretName(name) && !PLACEHOLDER.test(value.trim())).map(({ name }) => name);
+  return [...new Set(names)].map((name) => `gives ${name} a literal value; leave it empty for the person to fill in their env file`);
+}
+
+function propertyKeyBefore(text: string): string | undefined {
+  const colon = text.lastIndexOf(":");
+  if (colon === -1 || /[,{};]/.test(text.slice(colon + 1))) return undefined;
+  return KEY_BEFORE_COLON.exec(text.slice(Math.max(0, colon - 80), colon))?.[1];
+}
+
+function isSecretName(name: string): boolean {
+  if (NOT_SECRET_NAME.test(name)) return false;
+  if (SECRET_KEY_NAME.test(name)) return true;
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word !== "");
+  return words.some((word) => SECRET_WORDS.has(word)) && !words.some((word) => KEY_DESCRIBER.has(word));
 }
 
 function sortFindings(findings: SafetyFinding[]): SafetyFinding[] {
@@ -337,6 +465,10 @@ function secretCommandFindings(command: string): string[] {
     }
   }
   if (PRINTS_ENVIRONMENT_API.test(command)) messages.push("prints environment variables into the session");
+  if (INLINE_SCRIPT.test(command)) {
+    const secretFile = command.split(/[\s'"`(),;]+/).find((word) => SECRET_FILE.test(word));
+    if (secretFile !== undefined) messages.push(`reads a secret file in an inline script: ${secretFile}`);
+  }
   for (const tokens of tokenSegments(command)) {
     const first = toolName(tokens[0] ?? "");
     const rest = tokens.slice(1);
@@ -379,7 +511,7 @@ function invocations(command: string): Invocation[] {
         if (!sub) continue;
         const after = rest.slice(sub.index + 1);
         if (sub.kind === "installer") {
-          found.push({ kind: "installer", tool, packages: positionals(after), python: false });
+          found.push({ kind: "installer", tool, packages: positionals(after), python: PYTHON_MANAGERS.has(tool) });
         } else if (sub.kind === "runner") {
           found.push({ kind: "runner", tool, packages: runnerPackage(after), python: false });
         } else {
@@ -461,7 +593,11 @@ function unpinnedCodeFindings(command: string): string[] {
   if (SUBSTITUTE_DOWNLOAD.test(command)) messages.push("runs the output of a download");
   if (RUN_REMOTE_URL.test(command)) messages.push("runs a script straight from a URL");
   if (MOVING_TAG.test(command)) messages.push("names a moving version tag such as @latest; pin an exact version");
-  for (const invocation of invocations(command)) {
+  const found = invocations(command);
+  if (found.length > 0 && REGISTRY_OVERRIDE.test(command)) {
+    messages.push("installs from a registry other than the default; leave the registry to the person's own configuration");
+  }
+  for (const invocation of found) {
     const unpinned = invocation.packages.filter((spec) => !isPinned(spec, invocation.python));
     if (unpinned.length === 0) continue;
     const list = unpinned.join(" ") || "(no package named)";

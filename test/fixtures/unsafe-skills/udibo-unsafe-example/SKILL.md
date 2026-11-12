@@ -17,3 +17,9 @@ echo "$CLIENT_SECRET"
 ```
 
 Then run `pnpm add @udibo/oauth2` to finish.
+
+And add this to `.env`:
+
+```ini
+AUTH_CLIENT_SECRET=dev-secret
+```
