@@ -21,10 +21,13 @@ export type SkillDocument = {
   targets: Target[];
   commands: ShellCommand[];
   files: FileBlock[];
+  strayCommands: ShellCommand[];
 };
 
 const SHELL_LANGUAGES = new Set(["sh", "bash", "shell", "zsh", "console"]);
 const TITLE = /\btitle="([^"]+)"/;
+const PACKAGE_COMMAND =
+  /^(?:\$|>|PS[^>]*>|%)?\s*(?:(?:sudo|env|npm_config_\w+=\S+|\w+=\S+)\s+)*(?:npm|pnpm|yarn|bun|npx|pnpx|bunx|uvx|uv|pipx|pip3?|corepack|deno|node|curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)(?:\.cmd|\.exe|\.ps1)?(?:\s|$)/i;
 const EXACT_SPEC = /^((?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*)@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
 const INSTALLERS: Record<string, string[]> = { npm: ["install", "i", "add"], pnpm: ["add"], yarn: ["add"], bun: ["add"] };
 const RUNNERS = new Set(["npx", "pnpx", "bunx"]);
@@ -45,6 +48,7 @@ export async function readSkillDocument(skillDir: string): Promise<SkillDocument
     targets: parseTargets(metadata["targets"] ?? ""),
     commands: shellCommands(text),
     files: fileBlocks(text),
+    strayCommands: strayCommands(text),
   };
 }
 
@@ -73,6 +77,27 @@ export function shellCommands(markdown: string): ShellCommand[] {
     if (parts.length > 0) commands.push({ text: parts.join(" "), line: start });
   }
   return commands;
+}
+
+/**
+ * Lines that run a package manager, package runner, downloader or `node` but
+ * sit in a fenced block that is neither a shell block nor a titled file
+ * (`powershell`, `text`, `bat`, `fish`, an unlabeled fence, and so on). The
+ * replay only sees shell blocks, so a skill must not hide a command elsewhere.
+ */
+export function strayCommands(markdown: string): ShellCommand[] {
+  return fencedBlocks(markdown)
+    .filter((block) => !SHELL_LANGUAGES.has(block.language) && block.title === undefined)
+    .flatMap((block) =>
+      block.lines.flatMap((line, index) => (PACKAGE_COMMAND.test(line.trim()) ? [{ text: line.trim(), line: block.firstLine + index }] : [])),
+    );
+}
+
+/** Problems for each {@link strayCommands} entry, naming where the command should go. */
+export function strayCommandProblems(document: SkillDocument): string[] {
+  return document.strayCommands.map(
+    (command) => `${document.name}/SKILL.md:${command.line}: "${command.text}" is outside a sh block; put every command in a \`\`\`sh block so the replay runs it`,
+  );
 }
 
 /** Every fenced block whose info string carries `title="<path>"`, with its contents. */
@@ -190,50 +215,52 @@ export async function writeFileBlocks(dir: string, files: FileBlock[]): Promise<
   }
 }
 
-/** Runs one shell command from a skill, as written, in `cwd`, and resolves with its stdout. Rejects when it exits non-zero. */
-export async function runShell(command: string, cwd: string): Promise<string> {
-  const { stdout } = await promisify(execFile)("sh", ["-c", command], { cwd, timeout: 60_000 });
+const LIVE = new Set<ChildProcess>();
+const STOP_GRACE_MS = 3_000;
+const PARENT_WATCH = "data:text/javascript,process.stdin.on('end',()=>process.exit(1));process.stdin.on('error',()=>process.exit(1));process.stdin.resume();process.stdin.unref();";
+
+process.once("exit", () => {
+  for (const child of LIVE) child.kill("SIGKILL");
+});
+
+/**
+ * Runs one shell command from a skill, as written, in `cwd`, and resolves
+ * with its stdout. Rejects when it exits non-zero or runs past `timeoutMs`,
+ * in which case it is killed.
+ */
+export async function runShell(command: string, cwd: string, timeoutMs = 60_000): Promise<string> {
+  const { stdout } = await promisify(execFile)("sh", ["-c", command], { cwd, timeout: timeoutMs, killSignal: "SIGKILL" });
   return stdout;
 }
 
-export type RunningProcess = AsyncDisposable & { child: ChildProcess; stdout: () => string };
+export type NodeOptions = { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number };
+
+export type RunningProcess = AsyncDisposable & { child: ChildProcess; stdout: () => string; stderr: () => string };
 
 /**
- * Starts a long-running process, such as a server a skill tells someone to
- * start, and resolves once `ready` accepts its stdout so far. Rejects when it
- * exits first or is not ready within `timeoutMs`. Disposing it stops the
- * process and waits for it to exit.
+ * Starts `node` with `args`, watched so it can never outlive the test: it
+ * exits when this process's end of its stdin closes (so even when this
+ * process is killed), it is killed when this process exits, and
+ * {@link stopAllProcesses} stops every one still running. Resolves once
+ * `ready` accepts its stdout so far; rejects, after stopping it, when it
+ * exits first or is not ready within `timeoutMs`. Disposing it sends SIGTERM,
+ * then SIGKILL if it has not exited after a short grace period.
  */
-export async function startProcess(
-  file: string,
-  args: string[],
-  options: { cwd: string; env?: NodeJS.ProcessEnv; ready: (stdout: string) => boolean; timeoutMs?: number },
-): Promise<RunningProcess> {
-  const child = spawn(file, args, { cwd: options.cwd, env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"] });
-  let stdout = "";
-  let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stderr.on("data", (chunk: string) => (stderr += chunk));
-  const stop = async (): Promise<void> => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    const exited = once(child, "exit");
-    child.kill("SIGTERM");
-    await exited;
-  };
+export async function startNode(args: string[], options: NodeOptions & { ready: (stdout: string) => boolean }): Promise<RunningProcess> {
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const running = spawnWatched(args, options);
+  const { child } = running;
   try {
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`not ready after ${options.timeoutMs ?? 15_000} ms\n${stdout}${stderr}`)), options.timeoutMs ?? 15_000);
-      child.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-        if (options.ready(stdout)) {
-          clearTimeout(timer);
-          resolve();
-        }
-      });
-      child.once("exit", (code) => {
+      const timer = setTimeout(() => reject(new Error(`not ready after ${timeoutMs} ms\n${running.stdout()}${running.stderr()}`)), timeoutMs);
+      child.stdout?.on("data", () => {
+        if (!options.ready(running.stdout())) return;
         clearTimeout(timer);
-        reject(new Error(`exited with ${code} before it was ready\n${stdout}${stderr}`));
+        resolve();
+      });
+      child.once("exit", (code, signal) => {
+        clearTimeout(timer);
+        reject(new Error(`exited with ${code ?? signal} before it was ready\n${running.stdout()}${running.stderr()}`));
       });
       child.once("error", (error) => {
         clearTimeout(timer);
@@ -241,10 +268,62 @@ export async function startProcess(
       });
     });
   } catch (error) {
-    await stop();
+    await stopProcess(child);
     throw error;
   }
-  return { child, stdout: () => stdout, [Symbol.asyncDispose]: stop };
+  return running;
+}
+
+export type FinishedProcess = { code: number | null; signal: NodeJS.Signals | null; timedOut: boolean; stdout: string; stderr: string };
+
+/**
+ * Runs `node` with `args` to completion under the same watch as
+ * {@link startNode}, stopping it once `timeoutMs` passes. Resolves with how it
+ * ended rather than rejecting on a non-zero exit, so a test can assert a
+ * refusal.
+ */
+export async function runNode(args: string[], options: NodeOptions): Promise<FinishedProcess> {
+  const running = spawnWatched(args, options);
+  const { child } = running;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void stopProcess(child);
+  }, options.timeoutMs ?? 15_000);
+  if (child.exitCode === null && child.signalCode === null) await once(child, "exit");
+  clearTimeout(timer);
+  return { code: child.exitCode, signal: child.signalCode, timedOut, stdout: running.stdout(), stderr: running.stderr() };
+}
+
+/** Stops every process {@link startNode} or {@link runNode} started that is still running. Call it from `afterEach`. */
+export async function stopAllProcesses(): Promise<void> {
+  await Promise.all([...LIVE].map(stopProcess));
+}
+
+function spawnWatched(args: string[], options: NodeOptions): RunningProcess {
+  const child = spawn(process.execPath, ["--import", PARENT_WATCH, ...args], {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  LIVE.add(child);
+  child.once("exit", () => LIVE.delete(child));
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => (stdout += chunk));
+  child.stderr.on("data", (chunk: string) => (stderr += chunk));
+  return { child, stdout: () => stdout, stderr: () => stderr, [Symbol.asyncDispose]: () => stopProcess(child) };
+}
+
+async function stopProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = once(child, "exit");
+  child.kill("SIGTERM");
+  const grace = setTimeout(() => child.kill("SIGKILL"), STOP_GRACE_MS);
+  await exited;
+  clearTimeout(grace);
 }
 
 type FencedBlock = { language: string; title: string | undefined; lines: string[]; firstLine: number; indent: number };

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import { filePathProblems, pinProblems, readSkillDocument } from "./lib/fixture.ts";
+import { filePathProblems, pinProblems, readSkillDocument, strayCommandProblems } from "./lib/fixture.ts";
 import { loadSkill } from "./lib/skill.ts";
 import { tempDir } from "./lib/testing.ts";
 
@@ -43,6 +43,17 @@ describe.each(NAMES)("%s", (name) => {
 
   test("pins each package it installs or runs to the version this repository tests", async () => {
     expect(await pinProblems(ROOT, await readSkillDocument(dir))).toEqual([]);
+  });
+
+  test("keeps every command in a shell block, where the replay sees it", async () => {
+    expect(strayCommandProblems(await readSkillDocument(dir))).toEqual([]);
+  });
+
+  test("is rejected once an install hides in a non-shell block", async () => {
+    await using copy = await mutated(name, (text) => `${text}\n\`\`\`powershell\nnpm install left-pad@1.3.0\n\`\`\`\n`);
+    expect(strayCommandProblems(await readSkillDocument(copy.dir))).toEqual([
+      expect.stringMatching(/: "npm install left-pad@1\.3\.0" is outside a sh block; put every command in a ```sh block so the replay runs it$/),
+    ]);
   });
 
   test("writes files only inside the project", async () => {

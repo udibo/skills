@@ -1,6 +1,6 @@
 ---
 name: udibo-start-project
-description: Start a new web project that signs people in with the @udibo/oauth2 package, beginning on a local development identity provider that needs no account, with a later step that moves it to a hosted Udibo Identity tenant. Use when someone wants a new app with sign-in built on Udibo, wants to try Udibo Identity before signing up, or asks to scaffold a Hono backend with an OAuth2 sign-in flow.
+description: Start a new web project, in a new or empty directory, that signs people in with the @udibo/oauth2 package, beginning on a local development identity provider that needs no account, with a later step that moves it to a hosted Udibo Identity tenant. Use when someone wants a new app with sign-in built on Udibo, wants to try Udibo Identity before signing up, or asks to scaffold a new Hono backend with an OAuth2 sign-in flow. Not for adding sign-in to an existing project, and not for a directory that already holds code.
 license: MIT
 compatibility: Needs Node.js 24 or later, npm, and access to the npm registry. Written for a new, empty project directory.
 metadata:
@@ -18,6 +18,10 @@ changes configuration, not the sign-in code.
 
 Every package version below is exact. Use these versions, not newer ones: this
 skill was tested with them, and a different version may behave differently.
+The package's own
+[npm quickstart](https://github.com/udibo/oauth2/blob/main/docs/quickstart.md#start-from-npm-no-account)
+walks a person through the same local start by hand; follow this skill's
+steps and versions rather than mixing the two.
 
 ## Rules for the whole skill
 
@@ -28,9 +32,10 @@ skill was tested with them, and a different version may behave differently.
   secret into `.env` in their own editor. Never ask them for it, never open or
   search `.env`, and never run a command that would display its contents. You
   may create `.env` by copying `.env.example`, which holds no secret.
-- **The person runs the local provider themselves**, in a terminal of their
-  own. Its startup banner lists the development client's credentials and an
-  admin token, and that banner must not land in this conversation.
+- **The person runs the local provider and the app themselves**, each in a
+  terminal of their own. Both keep running until stopped. The provider's
+  startup banner lists the development client's credentials and an admin
+  token, and that banner must not land in this conversation.
 - **Only run the commands written here**, in fenced blocks, as written.
 
 ## Step 1: Agree the plan
@@ -45,10 +50,9 @@ answers filled in:
    node --version
    ```
 
-3. Whether they already have one of Udibo's service templates. Those are
-   private repositories that Udibo grants access to, and each expects a hosted
-   tenant from the start. If they have one, stop here and follow that
-   template's README instead; this skill builds its own smaller starting app.
+3. Whether they are starting from a Udibo starter project instead. If they
+   are, stop here and follow that starter's README; this skill builds its own
+   smaller starting app.
 
 The plan to present:
 
@@ -61,7 +65,8 @@ The plan to present:
 - Copy `.env.example` to `.env`. The person then adds the development client
   secret to `.env` themselves.
 - The person starts the local identity provider in their own terminal.
-- Start the app, and the person signs in at `http://localhost:3000`.
+- The person starts the app in another terminal of their own and signs in at
+  `http://localhost:3000`.
 - Not included: a database, a production session store, or deployment. The
   local provider and the app's sessions both live in memory, for development
   only.
@@ -207,14 +212,17 @@ Tell the person what this provider is:
 
 ## Step 5: Start the app and sign in
 
-Once the person says `.env` is saved and the provider is running, start the
-app:
+Once the person says `.env` is saved and the provider is running, ask them to
+start the app in another terminal of their own, inside the project directory,
+and to leave it running. Don't start it yourself: it keeps running until
+stopped.
 
 ```sh
 node --env-file=.env server.ts
 ```
 
-It prints `Listening on http://localhost:3000`. Ask the person to open
+It prints `Listening on http://localhost:3000`. To stop it later, the person
+presses Ctrl+C in that terminal. Ask the person to open
 `http://localhost:3000`, choose **Sign in**, and sign in as the seeded user
 their provider terminal lists. They should return to a page reading "Signed in
 as Alice Example". **Sign out** returns them to the signed-out page.

@@ -1,12 +1,12 @@
+import { execFile } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { execFile } from "node:child_process";
 
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
-import { fixtureProject, packageBin, readSkillDocument, runShell, startProcess, writeFileBlocks } from "../lib/fixture.ts";
+import { fixtureProject, packageBin, readSkillDocument, runNode, runShell, startNode, stopAllProcesses, writeFileBlocks } from "../lib/fixture.ts";
 import type { FileBlock, RunningProcess } from "../lib/fixture.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
@@ -84,7 +84,7 @@ function parseBanner(stdout: string): Banner {
 
 async function startProvider(cwd: string, args: string[]): Promise<RunningProcess> {
   const bin = await packageBin(ROOT, "@udibo/oauth2", "udibo-oauth2");
-  return startProcess(process.execPath, [bin, ...args], { cwd, ready: bannerComplete });
+  return startNode([bin, ...args], { cwd, ready: bannerComplete });
 }
 
 async function preparedProject(dir: string): Promise<void> {
@@ -94,59 +94,86 @@ async function preparedProject(dir: string): Promise<void> {
   await runShell(COMMANDS.envFile, dir);
 }
 
+const LISTEN_SPY = `data:text/javascript,${encodeURIComponent(`
+import net from "node:net";
+const listen = net.Server.prototype.listen;
+net.Server.prototype.listen = function (...args) {
+  if (typeof args[0] === "number" || (typeof args[0] === "string" && /^\\d+$/.test(args[0]))) {
+    process.stderr.write("fixture: listen requested port " + args[0] + "\\n");
+    args[0] = 0;
+  }
+  return listen.apply(this, args);
+};
+`)}`;
+
+type Page = { url: string; status: number; body: string };
+
 class Browser {
   #jars = new Map<string, Map<string, string>>();
+  #routes = new Map<string, string>();
+  #current: string | undefined;
 
-  cookieHeader(url: string): string {
-    return [...(this.#jars.get(new URL(url).host) ?? new Map<string, string>())].map(([name, value]) => `${name}=${value}`).join("; ");
+  constructor(routes: Record<string, string> = {}) {
+    for (const [origin, actual] of Object.entries(routes)) this.#routes.set(origin, actual);
   }
 
-  store(url: string, response: Response): void {
-    const host = new URL(url).host;
+  async open(url: string): Promise<Page> {
+    this.#current = undefined;
+    return this.#navigate(url, { method: "GET" });
+  }
+
+  async followLink(page: Page, text: string): Promise<Page> {
+    const href = new RegExp(`<a href="([^"]*)">${text}</a>`).exec(page.body)?.[1];
+    if (href === undefined) throw new Error(`no "${text}" link on ${page.url}:\n${page.body}`);
+    return this.#navigate(new URL(href.replaceAll("&amp;", "&"), page.url).href, { method: "GET" });
+  }
+
+  async submitSignIn(page: Page, user: { username: string; password: string }): Promise<Page> {
+    const returnTo = (/name="return_to" value="([^"]*)"/.exec(page.body)?.[1] ?? "").replaceAll("&amp;", "&");
+    const action = /<form method="post" action="([^"]*)" id="sign-in-form">/.exec(page.body)?.[1];
+    if (action === undefined) throw new Error(`no sign-in form on ${page.url}:\n${page.body}`);
+    return this.#navigate(new URL(action, page.url).href, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ return_to: returnTo, username: user.username, password: user.password }),
+    });
+  }
+
+  async #navigate(start: string, init: RequestInit): Promise<Page> {
+    let url = start;
+    let request = init;
+    for (let hop = 0; hop < 10; hop++) {
+      const target = new URL(url);
+      const headers = new Headers(request.headers);
+      const cookies = [...(this.#jars.get(target.host) ?? [])].map(([name, value]) => `${name}=${value}`).join("; ");
+      if (cookies !== "") headers.set("cookie", cookies);
+      headers.set("sec-fetch-site", this.#current === undefined ? "none" : this.#current === target.origin ? "same-origin" : "cross-site");
+      const actual = this.#routes.get(target.origin);
+      const response = await fetch(actual === undefined ? url : `${actual}${target.pathname}${target.search}`, { ...request, headers, redirect: "manual" });
+      this.#store(target.host, response);
+      this.#current = target.origin;
+      const location = response.headers.get("location");
+      if (response.status < 300 || response.status >= 400 || location === null) return { url, status: response.status, body: await response.text() };
+      url = new URL(location, url).href;
+      request = { method: "GET" };
+    }
+    throw new Error(`more than ten redirects from ${start}`);
+  }
+
+  #store(host: string, response: Response): void {
     const jar = this.#jars.get(host) ?? new Map<string, string>();
     for (const header of response.headers.getSetCookie()) {
       const pair = header.split(";")[0] ?? "";
+      const name = pair.slice(0, pair.indexOf("="));
       const value = pair.slice(pair.indexOf("=") + 1);
-      if (/max-age=0/i.test(header) || value === "") jar.delete(pair.slice(0, pair.indexOf("=")));
-      else jar.set(pair.slice(0, pair.indexOf("=")), value);
+      if (/max-age=0/i.test(header) || value === "") jar.delete(name);
+      else jar.set(name, value);
     }
     this.#jars.set(host, jar);
   }
 }
 
-async function signIn(app: ReturnType<AppModule["createApp"]>, appOrigin: string, user: Banner["users"][number]): Promise<{ browser: Browser; landing: string }> {
-  const browser = new Browser();
-  const visit = async (url: string, init: RequestInit = {}): Promise<Response> => {
-    const headers = new Headers(init.headers);
-    const cookies = browser.cookieHeader(url);
-    if (cookies !== "") headers.set("cookie", cookies);
-    const request = new Request(url, { ...init, headers, redirect: "manual" });
-    const response = url.startsWith(appOrigin) ? await app.fetch(request) : await fetch(request);
-    browser.store(url, response);
-    return response;
-  };
-
-  let url = `${appOrigin}/auth/login`;
-  for (let hop = 0; hop < 10; hop++) {
-    const response = await visit(url);
-    if (response.status === 200 && !url.startsWith(appOrigin)) {
-      const form = await response.text();
-      const returnTo = (/name="return_to" value="([^"]*)"/.exec(form)?.[1] ?? "").replaceAll("&amp;", "&");
-      const posted = await visit(new URL("/login", url).href, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ return_to: returnTo, username: user.username, password: user.password }),
-      });
-      url = new URL(posted.headers.get("location") ?? "", url).href;
-      continue;
-    }
-    const location = response.headers.get("location");
-    if (location === null) return { browser, landing: `${response.status} ${url} ${await response.text()}` };
-    url = new URL(location, url).href;
-    if (url.startsWith(appOrigin) && !url.includes("/callback") && !url.includes("/auth/")) return { browser, landing: url };
-  }
-  throw new Error("sign-in did not finish within ten redirects");
-}
+afterEach(stopAllProcesses);
 
 describe("udibo-start-project", () => {
   test("every command in the skill is replayed by this file", () => {
@@ -199,7 +226,7 @@ describe("udibo-start-project", () => {
       }),
     );
     const tsc = path.join(ROOT, "node_modules", ".bin", "tsc");
-    await expect(promisify(execFile)(tsc, ["-p", path.join(project.path, "tsconfig.json")], { cwd: project.path })).resolves.toBeDefined();
+    await expect(promisify(execFile)(tsc, ["-p", path.join(project.path, "tsconfig.json")], { cwd: project.path, timeout: 60_000, killSignal: "SIGKILL" })).resolves.toBeDefined();
   });
 
   test("the provider command starts the provider with the fixed issuer the env example names", async () => {
@@ -225,7 +252,7 @@ describe("udibo-start-project", () => {
     expect(new URL(env["AUTH_CALLBACK_URL"] ?? "").port).toBe("3000");
   });
 
-  test("a person signs in through the provider as the seeded user and signs out again", async () => {
+  test("the app command, with the person's env file, signs the seeded user in and out through the links on its pages", { timeout: 30_000 }, async () => {
     await using project = await fixtureProject(ROOT);
     await preparedProject(project.path);
     await using provider = await startProvider(project.path, [...withoutFlag(providerArgs(), "--issuer"), "--port", "0"]);
@@ -234,24 +261,38 @@ describe("udibo-start-project", () => {
     const client = banner.clients.find((entry) => entry.id === env["AUTH_CLIENT_ID"]);
     const user = banner.users[0];
     if (client?.secret === undefined || user === undefined) throw new Error(`unexpected provider banner:\n${provider.stdout()}`);
-    const { createApp } = (await import(pathToFileURL(path.join(project.path, "app.ts")).href)) as AppModule;
-    const callbackUrl = env["AUTH_CALLBACK_URL"] ?? "";
-    const appOrigin = new URL(callbackUrl).origin;
-    const app = createApp({ issuer: banner.issuer, clientId: client.id, clientSecret: client.secret, callbackUrl });
+    const envPath = path.join(project.path, ".env");
+    const personal = (await readFile(envPath, "utf8"))
+      .replace(`AUTH_ISSUER=${env["AUTH_ISSUER"]}\n`, `AUTH_ISSUER=${banner.issuer}\n`)
+      .replace("AUTH_CLIENT_SECRET=\n", `AUTH_CLIENT_SECRET=${client.secret}\n`);
+    await writeFile(envPath, personal);
 
-    const { browser, landing } = await signIn(app, appOrigin, user);
-    expect(landing).toBe(`${appOrigin}/`);
-    const home = await app.fetch(new Request(`${appOrigin}/`, { headers: { cookie: browser.cookieHeader(appOrigin) } }));
-    expect(await home.text()).toContain("Signed in as Alice Example");
+    const { PORT: _unset, ...environment } = process.env;
+    const [, ...args] = COMMANDS.app.split(" ");
+    await using app = await startNode(["--import", LISTEN_SPY, ...args], {
+      cwd: project.path,
+      env: environment,
+      ready: (stdout) => /Listening on http:\/\/localhost:\d+/.test(stdout),
+    });
+    const callback = new URL(env["AUTH_CALLBACK_URL"] ?? "");
+    expect(/fixture: listen requested port (\d+)/.exec(app.stderr())?.[1]).toBe(callback.port);
+    const actual = /Listening on (http:\/\/localhost:\d+)/.exec(app.stdout())?.[1] ?? "";
+    expect(skillText).toContain("It prints `Listening on http://localhost:3000`");
+    expect(skillText).toContain(`open \`${callback.origin}\``);
+
+    const browser = new Browser({ [callback.origin]: actual });
+    const home = await browser.open(`${callback.origin}/`);
+    expect(home.body).toContain("Signed out");
+    const signInPage = await browser.followLink(home, "Sign in");
+    expect(new URL(signInPage.url).origin).toBe(new URL(banner.issuer).origin);
+    const signedIn = await browser.submitSignIn(signInPage, user);
+    expect(signedIn).toMatchObject({ url: `${callback.origin}/`, status: 200 });
+    expect(signedIn.body).toContain("Signed in as Alice Example");
     expect(skillText).toContain('reading "Signed in as Alice Example"');
 
-    const logout = await app.fetch(
-      new Request(`${appOrigin}/auth/logout`, { headers: { cookie: browser.cookieHeader(appOrigin), "sec-fetch-site": "same-origin" } }),
-    );
-    browser.store(appOrigin, logout);
-    expect(logout.status).toBe(302);
-    const after = await app.fetch(new Request(`${appOrigin}/`, { headers: { cookie: browser.cookieHeader(appOrigin) } }));
-    expect(await after.text()).toContain("Signed out");
+    const signedOut = await browser.followLink(signedIn, "Sign out");
+    expect(signedOut).toMatchObject({ url: `${callback.origin}/`, status: 200 });
+    expect(signedOut.body).toContain("Signed out");
   });
 
   test("the app refuses a sign-in from a provider whose issuer differs from its configuration", async () => {
@@ -261,8 +302,7 @@ describe("udibo-start-project", () => {
     const banner = parseBanner(provider.stdout());
     const env = envExample();
     const client = banner.clients.find((entry) => entry.id === env["AUTH_CLIENT_ID"]);
-    const user = banner.users[0];
-    if (client?.secret === undefined || user === undefined) throw new Error(`unexpected provider banner:\n${provider.stdout()}`);
+    if (client?.secret === undefined) throw new Error(`unexpected provider banner:\n${provider.stdout()}`);
     const { createApp } = (await import(pathToFileURL(path.join(project.path, "app.ts")).href)) as AppModule;
     const callbackUrl = env["AUTH_CALLBACK_URL"] ?? "";
     const otherName = banner.issuer.replace("127.0.0.1", "localhost");
@@ -273,29 +313,12 @@ describe("udibo-start-project", () => {
     expect(login.headers.get("location")).toBeNull();
   });
 
-  test("the app command serves the signed-out home page from the person's env file", async () => {
-    await using project = await fixtureProject(ROOT);
-    await preparedProject(project.path);
-    const envPath = path.join(project.path, ".env");
-    await writeFile(envPath, (await readFile(envPath, "utf8")).replace("AUTH_CLIENT_SECRET=\n", "AUTH_CLIENT_SECRET=fixture-value\n"));
-    const [, ...args] = COMMANDS.app.split(" ");
-    await using app = await startProcess(process.execPath, args, {
-      cwd: project.path,
-      env: { ...process.env, PORT: "0" },
-      ready: (stdout) => /Listening on http:\/\/localhost:\d+/.test(stdout),
-    });
-    const url = /Listening on (http:\/\/localhost:\d+)/.exec(app.stdout())?.[1] ?? "";
-    expect(skillText).toContain("It prints `Listening on http://localhost:3000`");
-    const home = await fetch(`${url}/`);
-    expect(await home.text()).toContain("Signed out");
-  });
-
   test("the app command refuses to start without the client secret", async () => {
     await using project = await fixtureProject(ROOT);
     await preparedProject(project.path);
     const [, ...args] = COMMANDS.app.split(" ");
-    await expect(promisify(execFile)(process.execPath, args, { cwd: project.path, env: { ...process.env, PORT: "0" } })).rejects.toThrow(
-      "AUTH_CLIENT_SECRET is not set; add it to .env",
-    );
+    const result = await runNode(args, { cwd: project.path, env: { ...process.env, PORT: "0" }, timeoutMs: 10_000 });
+    expect(result).toMatchObject({ code: 1, timedOut: false });
+    expect(result.stderr).toContain("AUTH_CLIENT_SECRET is not set; add it to .env");
   });
 });

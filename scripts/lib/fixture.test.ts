@@ -1,9 +1,23 @@
+import { once } from "node:events";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import { fileBlocks, filePathProblems, packageBin, packagePins, pinProblems, runShell, shellCommands, startProcess } from "./fixture.ts";
+import {
+  fileBlocks,
+  filePathProblems,
+  packageBin,
+  packagePins,
+  pinProblems,
+  runNode,
+  runShell,
+  shellCommands,
+  startNode,
+  stopAllProcesses,
+  strayCommandProblems,
+  strayCommands,
+} from "./fixture.ts";
 import type { SkillDocument } from "./fixture.ts";
 import { tempDir } from "./testing.ts";
 
@@ -14,7 +28,7 @@ async function fakePackage(root: string, name: string, manifest: Record<string, 
 }
 
 function documentOf(markdown: string, targets: SkillDocument["targets"] = []): SkillDocument {
-  return { name: "udibo-test", targets, commands: shellCommands(markdown), files: fileBlocks(markdown) };
+  return { name: "udibo-test", targets, commands: shellCommands(markdown), files: fileBlocks(markdown), strayCommands: strayCommands(markdown) };
 }
 
 describe("shellCommands", () => {
@@ -63,6 +77,33 @@ describe("packagePins", () => {
     ["npm pkg set type=module", []],
   ])("reads %s", (text, expected) => {
     expect(packagePins({ text, line: 1 }).map((pin) => `${pin.name}@${pin.version}`)).toEqual(expected);
+  });
+});
+
+describe("strayCommands", () => {
+  test.each([
+    ["powershell", "npm install a@1.2.3"],
+    ["text", "npx --package=b@1.0.0 b run"],
+    ["bat", "pnpm add a@1.2.3"],
+    ["fish", "curl -o i.sh https://example.com/i.sh"],
+    ["nu", "node server.ts"],
+    ["", "$ npm i a@1.2.3"],
+    ["powershell", "PS C:\\app> npm.cmd install a@1.2.3"],
+    ["text", "npm_config_registry=https://r.example npm install a@1.2.3"],
+  ])("finds a command in a %s fence", (language, line) => {
+    const markdown = `# T\n\n\`\`\`${language}\n${line}\n\`\`\`\n`;
+    expect(strayCommands(markdown)).toEqual([{ text: line, line: 4 }]);
+    expect(strayCommandProblems(documentOf(markdown))).toHaveLength(1);
+  });
+
+  test("leaves shell blocks, titled files and prose-like text alone", () => {
+    const markdown = [
+      "```sh\nnpm install a@1.2.3\n```",
+      '```json title="package.json"\n{ "scripts": { "start": "node server.ts" } }\n```',
+      '```dockerfile title="Dockerfile"\nRUN npm ci\n```',
+      "```text\nListening on http://localhost:3000\n```",
+    ].join("\n\n");
+    expect(strayCommands(markdown)).toEqual([]);
   });
 });
 
@@ -122,26 +163,71 @@ describe("processes", () => {
     await expect(runShell("exit 3", dir.path)).rejects.toThrow();
   });
 
-  test("startProcess resolves once ready and stops the process on dispose", async () => {
+  test("startNode resolves once ready and stops the process on dispose", async () => {
     await using dir = await tempDir();
     const script = "console.log('ready'); setInterval(() => {}, 1000);";
-    const running = await startProcess(process.execPath, ["-e", script], { cwd: dir.path, ready: (stdout) => stdout.includes("ready") });
+    const running = await startNode(["-e", script], { cwd: dir.path, ready: (stdout) => stdout.includes("ready") });
     expect(running.stdout()).toBe("ready\n");
     await running[Symbol.asyncDispose]();
     expect(running.child.signalCode).toBe("SIGTERM");
   });
 
-  test("startProcess rejects when the process exits before it is ready", async () => {
+  test("startNode rejects when the process exits before it is ready", async () => {
     await using dir = await tempDir();
-    await expect(
-      startProcess(process.execPath, ["-e", "console.error('boom'); process.exit(2)"], { cwd: dir.path, ready: () => false }),
-    ).rejects.toThrow(/exited with 2 before it was ready\n[\s\S]*boom/);
+    await expect(startNode(["-e", "console.error('boom'); process.exit(2)"], { cwd: dir.path, ready: () => false })).rejects.toThrow(
+      /exited with 2 before it was ready\n[\s\S]*boom/,
+    );
   });
 
-  test("startProcess rejects and stops a process that is never ready", async () => {
+  test("startNode rejects and stops a process that is never ready", async () => {
     await using dir = await tempDir();
-    await expect(
-      startProcess(process.execPath, ["-e", "setInterval(() => {}, 1000);"], { cwd: dir.path, ready: () => false, timeoutMs: 200 }),
-    ).rejects.toThrow("not ready after 200 ms");
+    await expect(startNode(["-e", "setInterval(() => {}, 1000);"], { cwd: dir.path, ready: () => false, timeoutMs: 200 })).rejects.toThrow(
+      "not ready after 200 ms",
+    );
+  });
+
+  test("a started process exits once its parent's end of stdin closes", async () => {
+    await using dir = await tempDir();
+    const running = await startNode(["-e", "console.log('ready'); setInterval(() => {}, 1000);"], { cwd: dir.path, ready: (out) => out.includes("ready") });
+    const exited = once(running.child, "exit");
+    running.child.stdin?.end();
+    expect(await exited).toEqual([1, null]);
+  });
+
+  test("disposing kills a process that ignores SIGTERM", { timeout: 10_000 }, async () => {
+    await using dir = await tempDir();
+    const script = "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000);";
+    const running = await startNode(["-e", script], { cwd: dir.path, ready: (out) => out.includes("ready") });
+    await running[Symbol.asyncDispose]();
+    expect(running.child.signalCode).toBe("SIGKILL");
+  });
+
+  test("stopAllProcesses stops every process still running", async () => {
+    await using dir = await tempDir();
+    const script = "console.log('ready'); setInterval(() => {}, 1000);";
+    const running = await startNode(["-e", script], { cwd: dir.path, ready: (out) => out.includes("ready") });
+    await stopAllProcesses();
+    expect(running.child.signalCode).toBe("SIGTERM");
+  });
+
+  test("runNode reports how a process ended without rejecting", async () => {
+    await using dir = await tempDir();
+    expect(await runNode(["-e", "console.log('out'); console.error('err'); process.exit(3)"], { cwd: dir.path })).toEqual({
+      code: 3,
+      signal: null,
+      timedOut: false,
+      stdout: "out\n",
+      stderr: "err\n",
+    });
+    expect(await runNode(["-e", "1"], { cwd: dir.path })).toMatchObject({ code: 0, timedOut: false });
+  });
+
+  test("runNode stops a process that runs past its timeout", async () => {
+    await using dir = await tempDir();
+    expect(await runNode(["-e", "setInterval(() => {}, 1000);"], { cwd: dir.path, timeoutMs: 200 })).toMatchObject({
+      code: null,
+      signal: "SIGTERM",
+      timedOut: true,
+    });
   });
 });

@@ -135,14 +135,23 @@ size. A non-Markdown text file is treated as code throughout.
      `node -e "console.log(process.env.X)"`);
    - a secret file read with a reader such as `cat`, `grep`, `sed` or
      `Get-Content` (`.env` but not `.env.example`, `~/.aws/credentials`,
-     `~/.ssh/` private keys, `.npmrc`, `*.pem`).
+     `~/.ssh/` private keys, `.npmrc`, `*.pem`), or with an inline script
+     (`node -e`, `node -p`, `python -c` and the like naming `.env`).
 
    It never carries a secret literal either: no value that looks like a
    credential (a private key block, a cloud, source-host, chat, payment or
-   npm token, a JSON Web Token, a URL with a password in it), and no literal
-   value given to a setting or field whose name says it holds a secret
-   (`AUTH_CLIENT_SECRET=…`, `"password": "…"`). An empty value, an
-   `<angle-bracket>` placeholder or a variable reference is fine.
+   npm token, a JSON Web Token, an `Authorization: Bearer` or `Basic` value, a
+   URL with a password in it), and no literal value given to a setting, field
+   or flag whose name says it holds a secret. That covers `NAME=value` in code
+   or inline code, quoted `"password": "…"` and `secret = "…"`, unquoted
+   `client_secret: …` in YAML, INI, TOML and unlabeled blocks,
+   `--client-secret …`, and a fallback such as
+   `process.env.SESSION_KEY ?? "…"`. A name counts as a secret when it says
+   secret, token, password, passphrase, credential, API, private or access
+   key, or has `PASS`, `PWD` or `KEY` as a word (`ENCRYPTION_KEY`), unless it
+   says public or publishable or the key is a file, path, ID or the like
+   (`KEY_FILE`, `primaryKey`). An empty value, an `<angle-bracket>`
+   placeholder or a variable reference is fine.
 
    Secrets stay in files or a secret store that the agent doesn't read back.
 2. **Every command pins an exact version.** Installing code always fetches it,
@@ -151,7 +160,9 @@ size. A non-Markdown text file is treated as code throughout.
    - No download is piped or substituted into a shell or interpreter. That
      covers `curl … | sh`, `| /bin/bash`, `| env bash`, `| xargs sh -c`,
      `bash <(curl …)` and `irm … | iex`, and also a pipe continued onto the next
-     line. No script runs straight from a URL.
+     line. No script runs straight from a URL, and no script a skill downloads
+     to a file (`curl -o i.sh …`, `wget …`, `curl … > i.sh`) is then run, in
+     the same command or a later one in the same file.
    - No moving tag such as `@latest` or `@next`.
    - `npx`, `bunx`, `pnpx`, `uvx`, `pipx run`, `npm exec`, `pnpm dlx`,
      `yarn dlx`, `bun x` and `npm`/`pnpm`/`yarn`/`bun create` name their package
@@ -164,6 +175,12 @@ size. A non-Markdown text file is treated as code throughout.
      quoted `sh -c '…'`. A git dependency must name a full commit SHA, and a
      local path is fine. Installing from a lockfile
      (`pnpm install --frozen-lockfile`) is fine.
+   - `pip install`, `pip3 install`, `python -m pip install` and `uv add` give
+     every package an exact `==` version. A requirements file (`-r`) is left
+     to review.
+   - No install or package run names its own registry or index
+     (`--registry`, `--index-url`, `-i`, `npm_config_registry=`), because an
+     exact version from another registry can be anything.
 3. **Commands are in fenced blocks.** Any command the agent is told to run sits
    in a fenced code block, never in inline code, a list item, a quote, a table
    cell or after a label such as `Run:`, so the person can see exactly what will
@@ -190,9 +207,15 @@ still gets a reviewer reading it as instructions to a stranger's agent.
 Not modelled, so left to review:
 
 - commands the pin rule doesn't parse: `git clone` without a pinned ref,
-  container images, system package managers (`brew`, `apt`, `winget`), and
-  language package managers other than npm, pnpm, Yarn, Bun, uvx and pipx
-  (`pip`, `cargo`, `go install`, `gem`, `composer`);
+  container images, system package managers (`brew`, `apt`, `winget`),
+  language package managers other than npm, pnpm, Yarn, Bun, pip, uv and
+  pipx (`cargo`, `go install`, `gem`, `composer`), the contents of a
+  requirements file, and a registry set in a config file such as `.npmrc`;
+- indirection: a URL or command held in a variable, encoded text, or a
+  downloaded script run under another name or from another file;
+- quoting the parser doesn't split, such as `pip install 'pkg>=2'`;
+- a secret written into prose ("the secret is abc123"), and an unquoted
+  `key: value` secret outside a YAML, INI, TOML, text or unlabeled block;
 - link targets the link check doesn't parse: link paths containing
   parentheses, and targets in raw HTML (`<a href>`, `<img src>`);
 - the fetched cache is trusted by its recorded pin. The build doesn't re-hash
@@ -277,7 +300,10 @@ secrets and no model calls, so a skill whose steps stop working fails CI.
 - **Conventions a skill follows so it can be replayed.** Every command the
   agent or the person runs is in a fenced block marked `sh` (or `bash`,
   `shell`, `zsh`, `console`). Every file the skill creates is a fenced block
-  whose info string names it: ```` ```ts title="app.ts" ````.
+  whose info string names it: ```` ```ts title="app.ts" ````. A package
+  manager, package runner, downloader or `node` command in any other block
+  (`powershell`, `text`, an unlabeled fence) fails, because the replay would
+  not see it.
 - **`scripts/skills.test.ts` runs on every skill.** It requires the skill to
   pass every rule above, and it re-runs the rules on copies of the skill
   broken on purpose (a pinned version removed, a download piped into a shell,
@@ -295,9 +321,13 @@ secrets and no model calls, so a skill whose steps stop working fails CI.
   `.cache/fixture-projects/` and runs the commands there. Commands that need
   no network run as written. An install from the registry is covered by the
   version check above instead. A long-running command, such as a server,
-  starts as written with only its port changed to a free one, and the test
-  drives it the way the person would. `scripts/lib/fixture.ts` holds the
-  shared pieces.
+  starts as written. Where the skill fixes a port, the test records the port
+  the program asks for, checks it against the skill, and gives it a free one
+  instead, and the test's browser sends the skill's URL to that port. The test
+  then drives it the way the person would, following the links on the pages
+  it serves. Every process a replay starts has a timeout, is stopped after
+  each test (SIGTERM, then SIGKILL), and exits on its own when the test
+  process dies. `scripts/lib/fixture.ts` holds the shared pieces.
 
 **Agent-run evaluations are not built.** A later job could have an agent follow
 each skill against the same fixture projects. It would need a model API key,
