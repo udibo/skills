@@ -1,0 +1,5 @@
+{
+  "name": "udibo",
+  "description": "Skills that guide a coding agent through adding Udibo Identity and @udibo/oauth2 to a project.",
+  "skills": "./skills/"
+}

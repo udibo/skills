@@ -5,6 +5,7 @@ export type SafetyRule =
   | "unpinned-or-piped-code"
   | "unfenced-command"
   | "hidden-content"
+  | "secret-literal"
   | "too-long-to-check";
 
 export type SafetyFinding = { rule: SafetyRule; line: number; message: string };
@@ -50,6 +51,22 @@ const FILE_READER = new Set([
   "gawk", "cut", "strings", "xxd", "od", "hexdump", "nl", "tac", "sort", "uniq", "base64", "jq", "yq", "get-content", "gc",
   "select-string", "sls", "source", ".",
 ]);
+
+const CREDENTIAL_FORMATS: { pattern: RegExp; label: string }[] = [
+  { pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/, label: "a private key block" },
+  { pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/, label: "an AWS access key ID" },
+  { pattern: /\bgh[pousr]_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{22,}/, label: "a GitHub token" },
+  { pattern: /\bxox[abposr]-[A-Za-z0-9-]{10,}/, label: "a Slack token" },
+  { pattern: /\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}/, label: "a payment API key" },
+  { pattern: /\bAIza[0-9A-Za-z_-]{35}\b/, label: "a Google API key" },
+  { pattern: /\bnpm_[A-Za-z0-9]{36}\b/, label: "an npm token" },
+  { pattern: /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/, label: "a JSON Web Token" },
+];
+const URL_CREDENTIALS = /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@'"`]+:([^\s/@'"`]+)@/gi;
+const SECRET_KEY_NAME = /secret|token|passw(?:or)?d|passphrase|api[-_]?key|private[-_]?key|access[-_]?key|credential/i;
+const ENV_ASSIGNMENT = /^\s*(?:export\s+|set\s+|\$env:)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/;
+const QUOTED_ASSIGNMENT = /["']?([A-Za-z_][A-Za-z0-9_-]*)["']?\s*[:=]\s*(["'`])((?:(?!\2).)*)\2/g;
+const PLACEHOLDER = /^(?:|<[^<>]+>|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|\{\{[^{}]+\}\}|x{3,}|X{3,}|\*{3,}|\.{3}|…|(?:your|my)[-_][\w-]+|change[-_]?me|replace[-_]?me)$/i;
 
 const DOWNLOADER = "(?:curl|wget|fetch|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|http|https|xh|aria2c)";
 const INTERPRETER =
@@ -166,6 +183,16 @@ export function checkSafety(text: string, options: { markdown?: boolean } = {}):
     }
   }
 
+  for (const entry of lines) {
+    const isCode = !markdown || entry.kind === "code";
+    if (entry.kind === "fence-delimiter" && markdown) continue;
+    const texts = isCode ? [entry.text] : inlineCodeSpans(entry.text);
+    const findingsHere = new Set<string>();
+    for (const message of credentialFormatFindings(entry.text)) findingsHere.add(message);
+    for (const text of texts) for (const message of secretAssignmentFindings(text, isCode)) findingsHere.add(message);
+    findingsHere.forEach((message) => add("secret-literal", entry.line, message));
+  }
+
   if (!markdown) return sortFindings(findings);
 
   for (const span of checkSpans) {
@@ -192,6 +219,26 @@ export function checkSafety(text: string, options: { markdown?: boolean } = {}):
     }
   }
   return sortFindings(findings);
+}
+
+function credentialFormatFindings(text: string): string[] {
+  const messages = CREDENTIAL_FORMATS.filter(({ pattern }) => pattern.test(text)).map(
+    ({ label }) => `contains what looks like ${label}; a skill carries no credential, real or example`,
+  );
+  for (const match of text.matchAll(URL_CREDENTIALS)) {
+    if (!PLACEHOLDER.test(match[1] ?? "")) messages.push("contains a URL with a password in it; leave the password for the person to put in an env file");
+  }
+  return messages;
+}
+
+function secretAssignmentFindings(text: string, wholeLine: boolean): string[] {
+  const assigned: { name: string; value: string }[] = [];
+  const env = wholeLine ? ENV_ASSIGNMENT.exec(text) : null;
+  if (env) assigned.push({ name: env[1] ?? "", value: (env[2] ?? "").replace(/^(["'])(.*)\1$/, "$2") });
+  for (const match of text.matchAll(QUOTED_ASSIGNMENT)) assigned.push({ name: match[1] ?? "", value: match[3] ?? "" });
+  return assigned
+    .filter(({ name, value }) => SECRET_KEY_NAME.test(name) && !PLACEHOLDER.test(value.trim()))
+    .map(({ name }) => `gives ${name} a literal value; leave it empty for the person to fill in their env file`);
 }
 
 function sortFindings(findings: SafetyFinding[]): SafetyFinding[] {

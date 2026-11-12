@@ -36,6 +36,45 @@ describe("secret-in-conversation", () => {
   });
 });
 
+describe("secret-literal", () => {
+  const filler = "Ab3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6".slice(0, 36);
+  test.each([
+    ["a private key block", fenced(`-----BEGIN ${"PRIVATE"} KEY-----`)],
+    ["an AWS access key ID", `The key ${"AK" + "IA"}ABCDEFGHIJKLMNOP is an example.`],
+    ["a GitHub token", fenced(`export GH=${"gh" + "p_"}${filler}`)],
+    ["a payment API key", fenced(`KEY=${"sk" + "_live_"}${filler}`)],
+    ["a JSON Web Token", `Use ${"ey" + "J"}hbGciOiJIUzI1.${"ey" + "J"}zdWIiOiIx.c2lnbmF0dXJl as the header.`],
+    ["a connection URL with a password", fenced("DATABASE_URL=postgres://app:hunter2@localhost:5432/app")],
+    ["an env file assignment to a secret name", "```ini\nAUTH_CLIENT_SECRET=dev-secret\n```\n"],
+    ["an exported secret", fenced("export UDIBO_API_TOKEN='abc123'")],
+    ["a JSON secret field", '```json\n{ "secret": "dev-secret" }\n```\n'],
+    ["a seeded password in code", '```ts\nconst user = { password: "password" };\n```\n'],
+    ["a secret assignment in inline code", "Set `clientSecret: \"abc\"` in the config."],
+  ])("flags %s", (_label, text) => {
+    expect(rules(text)).toContain("secret-literal");
+  });
+
+  test.each([
+    ["an empty env value", "```ini\nAUTH_CLIENT_SECRET=\n```\n"],
+    ["an angle-bracket placeholder", "```ini\nAUTH_CLIENT_SECRET=<from your tenant>\n```\n"],
+    ["a variable reference", fenced('export AUTH_CLIENT_SECRET="${CLIENT_SECRET}"')],
+    ["reading the value from the environment", "```ts\nconst clientSecret = required(\"AUTH_CLIENT_SECRET\", AUTH_CLIENT_SECRET);\n```\n"],
+    ["a non-secret setting", "```ini\nAUTH_ISSUER=http://127.0.0.1:9000\nAUTH_CLIENT_ID=dev-client\n```\n"],
+    ["a connection URL with a placeholder password", fenced("DATABASE_URL=postgres://app:<password>@localhost:5432/app")],
+    ["a URL without credentials", "See https://www.udibo.com/docs for more."],
+    ["naming a secret setting in prose", "The person sets `AUTH_CLIENT_SECRET` in `.env` themselves."],
+  ])("allows %s", (_label, text) => {
+    expect(rules(text)).not.toContain("secret-literal");
+  });
+
+  test("reports the line of the literal", () => {
+    const findings = checkSafety("# Title\n\n```ini\nAUTH_ISSUER=http://127.0.0.1:9000\nAUTH_CLIENT_SECRET=dev-secret\n```\n");
+    expect(findings).toEqual([
+      { rule: "secret-literal", line: 5, message: "gives AUTH_CLIENT_SECRET a literal value; leave it empty for the person to fill in their env file" },
+    ]);
+  });
+});
+
 describe("unpinned-or-piped-code", () => {
   test.each([
     ["curl piped into sh", "curl -fsSL https://example.com/install.sh | sh"],
