@@ -4,6 +4,10 @@ export type MarkdownLine = {
   kind: "prose" | "fence-delimiter" | "code";
 };
 
+/** Fence languages whose blocks hold commands the person or agent runs. */
+export const SHELL_LANGUAGES: ReadonlySet<string> = new Set(["sh", "bash", "shell", "zsh", "console"]);
+
+const TITLE = /\btitle="([^"]+)"/;
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 /**
@@ -49,4 +53,28 @@ export function withoutInlineCode(prose: string): string {
 /** Returns the contents of each inline code span in a prose line. */
 export function inlineCodeSpans(prose: string): string[] {
   return [...prose.matchAll(/(`+)([^`]*?)\1/g)].map((match) => (match[2] ?? "").trim());
+}
+
+/** A fenced code block: its language, its `title="…"` path if any, its lines with the fence indent removed, and the 1-based line of its first content line. */
+export type FencedBlock = { language: string; title: string | undefined; lines: string[]; firstLine: number; indent: number };
+
+/** Every fenced code block in a Markdown document, in order. */
+export function fencedBlocks(markdown: string): FencedBlock[] {
+  const blocks: FencedBlock[] = [];
+  let current: FencedBlock | undefined;
+  for (const entry of classifyLines(markdown)) {
+    if (entry.kind === "fence-delimiter") {
+      if (current) {
+        blocks.push(current);
+        current = undefined;
+      } else {
+        const indent = /^ */.exec(entry.text)?.[0].length ?? 0;
+        const info = entry.text.trim().replace(/^(`{3,}|~{3,})/, "").trim();
+        current = { language: (info.split(/\s+/)[0] ?? "").toLowerCase(), title: TITLE.exec(info)?.[1], lines: [], firstLine: entry.line + 1, indent };
+      }
+    } else if (entry.kind === "code" && current) {
+      current.lines.push(entry.text.replace(new RegExp(`^ {0,${current.indent}}`), ""));
+    }
+  }
+  return blocks;
 }

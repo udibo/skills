@@ -173,8 +173,8 @@ importers:
         specifier: 26.6.5
         version: 26.6.5
       '@udibo/oauth2':
-        specifier: 0.51.0
-        version: 0.51.0(hono@4.13.17)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.6(@types/node@26.6.5)(yaml@2.9.1)))
+        specifier: 0.52.0
+        version: 0.52.0(hono@4.13.17)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.6(@types/node@26.6.5)(yaml@2.9.1)))
       ajv:
         specifier: 8.20.0
         version: 8.20.0
@@ -516,8 +516,8 @@ packages:
     resolution: {integrity: sha512-BnOhpKzLpB3+R+QfLDVxZRETvFPewKCnSIt+8abPBeB18hNzstcF2C3NgkieMY1mRKZ5FhdfXxr1MvXVICATvw==}
     engines: {node: '>=22'}
 
-  '@udibo/oauth2@0.51.0':
-    resolution: {integrity: sha512-V6xgSk4VAqrvIg4k+PHTnFj910WRvi69KuelZ/ZyYUbsED7IAJQN13JoIrxcrZqH93e8bp6jl0eD7P4pdSTV8Q==}
+  '@udibo/oauth2@0.52.0':
+    resolution: {integrity: sha512-O+WNvLKkK24vSXX3HmIlbQdQS54pF/kwLh0+QQrUGf3nWDsbQnGaooFWYomAuLOXxVf6hjkUdkmuoZyaUhLOfw==}
     engines: {node: '>=22'}
     hasBin: true
     peerDependencies:
@@ -1127,7 +1127,7 @@ snapshots:
 
   '@udibo/http-error@0.12.0': {}
 
-  '@udibo/oauth2@0.51.0(hono@4.13.17)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.6(@types/node@26.6.5)(yaml@2.9.1)))':
+  '@udibo/oauth2@0.52.0(hono@4.13.17)(vitest@5.0.5(@types/node@26.6.5)(vite@8.3.6(@types/node@26.6.5)(yaml@2.9.1)))':
     dependencies:
       '@hono/node-server': 2.1.6(hono@4.13.17)
       '@simplewebauthn/server': 14.1.0

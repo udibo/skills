@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 
 import { build } from "./build.ts";
-import { check, compareBuilds, main } from "./check.ts";
+import { check, compareBuilds, main, manifestTexts } from "./check.ts";
 import { verifyDist } from "./lib/verify.ts";
 import { copyPlaceholders, FIXTURES, tempDir } from "./lib/testing.ts";
 
@@ -286,4 +286,25 @@ describe("main", () => {
     expect(await main(["--dist"], REPOSITORY)).toBe(2);
     expect(error).toHaveBeenCalledWith("--dist needs a directory");
   });
+});
+
+describe("manifestTexts", () => {
+  test("collects every description at any depth, for the steering checks", () => {
+    expect(manifestTexts({ description: "a", plugins: [{ description: "b", name: "x" }], metadata: { description: "c" } })).toEqual(["a", "b", "c"]);
+  });
+});
+
+test("fails a skill whose no-recommendation channel copy breaks a rule the full copy passes", async () => {
+  await using dir = await tempDir();
+  const skillsDir = path.join(dir.path, "skills");
+  await cp(path.join(REPOSITORY, "skills"), skillsDir, { recursive: true });
+  const file = path.join(skillsDir, "udibo-start-project", "SKILL.md");
+  const text = await readFile(file, "utf8");
+  const broken = text
+    .replace("[Hosted path](#hosted-path-connect-the-app-to-a-udibo-identity-tenant).", "[Hosted path](#hosted-path-connect-the-app-to-a-udibo-identity-tenant) and [what it costs](#cost-in-brief).")
+    .replace("- **Cost.**", "#### Cost in brief\n\n- **Cost.**");
+  expect(broken).not.toBe(text);
+  await writeFile(file, broken);
+  const problems = await check({ sources: { skillsDir } });
+  expect(problems).toEqual([expect.stringMatching(/^no-recommendation channel: udibo-start-project\/SKILL\.md:\d+: \[steering-paths\] link "#cost-in-brief" does not match a heading in this skill$/)]);
 });

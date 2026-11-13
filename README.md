@@ -4,13 +4,21 @@ Agent skills are instructions a coding agent follows to do a job in your
 project. The skills in this repository help an agent put
 [Udibo Identity](https://udibo.com) and the `@udibo/oauth2` package into a
 project: start a new project on them, add them to an existing project, or move
-a project over from another identity provider.
+a project between authorization servers.
+
+Where a skill reaches the choice of authorization server, it offers three
+paths with the same depth of help: Udibo Identity, the hosted service, which
+Udibo recommends; an authorization server you run yourself on
+`@udibo/oauth2`; and migrating between authorization servers, in either
+direction. The recommendation is stated once, as Udibo's, with its trade-offs,
+and the skill then follows the person's choice. The
+[steering rules](#steering-rules) below hold every skill to that.
 
 ## Skills
 
 | Skill | What it does |
 | ----- | ------------ |
-| [`udibo-start-project`](skills/udibo-start-project/SKILL.md) | Starts a new Hono web app with sign-in through `@udibo/oauth2`, on the package's local development identity provider with no account needed, and later moves it to a hosted Udibo Identity tenant. |
+| [`udibo-start-project`](skills/udibo-start-project/SKILL.md) | Starts a new Hono web app with sign-in through `@udibo/oauth2`, either on a hosted Udibo Identity tenant the person creates or on an authorization server they run, starting on the package's local development identity provider with no account needed. |
 
 No version is tagged yet. The three skills under `test/fixtures/` are
 placeholders the tests use; they are not guidance, so don't follow them.
@@ -221,6 +229,81 @@ Not modelled, so left to review:
 - the fetched cache is trusted by its recorded pin. The build doesn't re-hash
   `.cache/` against the tarball's integrity.
 
+### Steering rules
+
+A skill runs inside someone else's coding agent, so any recommendation it makes
+has to be one a person would accept from a colleague: said once, attributed,
+with its costs named, and dropped once they choose.
+
+**The vendors' rules come first.** No skill, `description`, `metadata` or
+plugin manifest may break
+[Anthropic's Software Directory Policy](https://support.claude.com/en/articles/13145358-anthropic-software-directory-policy)
+or [OpenAI's plugin guidelines](https://developers.openai.com/plugins/plugin-guidelines.md).
+Where a rule below conflicts with them, the vendor's rule wins, and the
+recommendation is weakened or removed for that vendor's channel. Before every
+tag and every directory submission, both policies are read again and every
+skill is checked against them.
+
+The conventions a skill follows so the harness can check it exactly:
+
+- **Paths.** A heading `Paths` (level 2 or 3) with one list item per path,
+  each starting with its bold label, `**Hosted: Udibo Identity.**`,
+  `**Your own authorization server on @udibo/oauth2.**` and
+  `**Migrating between authorization servers.**`, and each linking to the
+  section of the skill, or the page, that serves it.
+- **The recommendation.** A heading `Udibo's recommendation` (level 2 or 3)
+  that says "Udibo recommends …" and has one list item per trade-off,
+  labelled `**Cost.**`, `**Leaving.**`, `**Where data is held.**` and
+  `**What you run.**`. Cost is stated only as "the hosted service has its own
+  prices and self-hosting has its own running costs", with a link to
+  `https://www.udibo.com`.
+- **The hosted step.** The one section where the person connects the app to
+  their own tenant has a heading starting `Hosted path:`, and says the person
+  approves it before it runs.
+- **Migration skills.** A skill that moves users declares
+  `metadata.moves-users` as any of `onto-udibo`, `off-udibo` and
+  `between-other-providers`, and lists in `metadata.providers` the providers
+  it moves users from or to, by the names in `PROVIDERS`
+  (`scripts/lib/steering.ts`).
+
+| Rule | Enforced by |
+| ---- | ----------- |
+| A skill that mentions the hosted service (the words "Udibo Identity" or a `udibo.com` address) has one Paths section naming all three paths, each linking to what serves it | Harness: the section exists once, has the three labels, each has a link, and every `#anchor` matches a heading. Review: that each target really serves its path |
+| Exactly one recommendation, attributed to Udibo, beside the Paths section | Harness: the heading occurs once, says "Udibo recommends", and "recommend", "suggest" and "we advise" appear nowhere else in the skill |
+| Trade-offs both ways: cost, leaving, where data is held, what you run | Harness: the four labels are present, each names the hosted service and running your own, and Cost is the fixed sentence with its link. Review: that each statement is true and sourced |
+| The recommendation sits in the plan step, before any command, and is never raised again | Harness: the Paths and recommendation sections come before the first shell or file block, and no recommendation words appear elsewhere. Review: that the agent does not raise it again in conversation |
+| The person's choice is followed; the skill changes path only when they ask | Review |
+| Equal help on every path | Harness: the replay covers every command on every path. Review: depth |
+| Nothing hosted happens implicitly | Harness: no shell command names a `udibo.com` host or calls an issuer's `/api/` path; no other code or file block names a `udibo.com` host, except a placeholder such as `{tenant-id}.udibo.com` inside the hosted step; the hosted step says the person approves it; there is at most one |
+| `description` and `metadata` stay neutral | Harness: "recommend", "suggest", "prefer", "instead of", "rather than", "better", "best", "always use", "superior" and the like fail in `description`, in every `metadata` value and in the plugin manifests' descriptions. Review: that no trigger is broader than the job |
+| No disparagement and no framing in terms of another provider | Harness: "‹word›-style sign-in" (and pages, flows, auth and the like), "clone of", and "like", "alternative to", "similar to", "compared to" or "replacement for" a listed provider fail; a listed provider's name fails outside a migration skill declaring it. Review: tone |
+| No absolute claims | Harness: "best", "guaranteed", "impossible", "100%", "unbreakable", "bulletproof", "foolproof", "fully secure" and the like fail ("best-effort" and "best practice" are allowed). Review: every claim against the code and site |
+| No prices, plans, trials, discounts or upgrade prompts, and no waitlist | Harness: a currency amount in prose, "free trial", "free tier", "‹name› plan", "pricing", "discount", "promo", "coupon", "upgrade to a paid plan" and the like, a link to a pricing page, and "waitlist" fail. "Upgrade" on its own, as in a password hash that upgrades on next sign-in, is allowed |
+| Leaving is supported as well as arriving | Harness: the build fails when a skill declaring `moves-users: onto-udibo` is published without `udibo-migrate-from-udibo`; `udibo-migrate-from-udibo` must declare `off-udibo`, and any other `udibo-migrate-from-…` skill must declare a direction |
+| The vendors' rules come first | Harness: the no-recommendation channel below. Review: the re-read of both policies before each tag and submission |
+
+These are pattern checks with the same limits as the safety rules: they keep
+the mechanical part of each rule from regressing and leave its judgement to
+review. A rule that flags a legitimate sentence is reworded rather than
+excused; `scripts/lib/steering.test.ts` lists the sentences each rule must
+accept, such as "present a plan" and "the plan step".
+
+#### Channel copies without the recommendation
+
+A channel whose rules do not allow a recommendation gets copies with the
+`Udibo's recommendation` section removed (its heading and everything up to the
+next heading at the same or a higher level). `pnpm check` builds those copies
+on every run and holds them to every other rule, and the tests show each one
+keeps the same commands and files, so the replay is unchanged. To write them:
+
+```sh
+node scripts/build.ts --channel no-recommendation
+```
+
+That writes `dist/channels/no-recommendation/` and leaves the committed
+marketplace tree alone. A skill must not link to anything inside the
+recommendation section, or that copy's link check fails.
+
 ### Skills owned by another repository
 
 A package owns its own skill. `@udibo/oauth2`'s skill is written and versioned
@@ -276,7 +359,8 @@ pnpm build
 ```
 
 - `pnpm check` type-checks the scripts, then runs `scripts/check.ts`. That
-  validates every source skill, builds twice into temporary directories and
+  validates every source skill, including the steering rules, builds every
+  channel's copies, builds twice into temporary directories and
   requires byte-identical output, validates the built index against the
   vendored discovery schema (`schemas/`) and recomputes every digest. It
   requires the output to be exactly the files the build writes: every manifest
@@ -308,7 +392,10 @@ secrets and no model calls, so a skill whose steps stop working fails CI.
   pass every rule above, and it re-runs the rules on copies of the skill
   broken on purpose (a pinned version removed, a download piped into a shell,
   a secret literal added, the name prefix dropped) to show each copy is
-  rejected. Every package a skill installs or runs must be a
+  rejected, and does the same for each steering rule (the recommendation
+  twice, the Paths section or a path removed, the recommendation after a
+  command, a command contacting Udibo, "best", a price, an upgrade prompt,
+  "waitlist", a preference word in `description`). Every package a skill installs or runs must be a
   `devDependency` of this repository at exactly the pinned version and be
   named in the skill's `metadata.targets`. That is how the replay tests the
   versions the skill gives, and pnpm's three-day release-age gate

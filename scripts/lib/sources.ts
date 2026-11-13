@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { compare, loadSkill, NAME_PATTERN, SEMVER_PATTERN } from "./skill.ts";
 import type { Issue, Skill } from "./skill.ts";
+import { LEAVING_SKILL, missingLeavingSkill } from "./steering.ts";
+import type { Channel } from "./steering.ts";
 
 export type ExternalPin = {
   name: string;
@@ -19,6 +21,7 @@ export type SourceOptions = {
   skillsDir: string;
   externalFile?: string;
   externalCacheDir?: string;
+  channel?: Channel;
 };
 
 const PACKAGE_NAME = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
@@ -71,7 +74,7 @@ export async function collectSources(options: SourceOptions): Promise<Sources> {
   };
 
   for (const name of await skillDirectories(options.skillsDir)) {
-    const result = await loadSkill(path.join(options.skillsDir, name));
+    const result = await loadSkill(path.join(options.skillsDir, name), { channel: options.channel ?? "full" });
     add(name, result.issues);
     if (result.skill) skills.push(result.skill);
   }
@@ -91,7 +94,7 @@ export async function collectSources(options: SourceOptions): Promise<Sources> {
         add(pin.name, [{ file: "external-skills.json", message: "not fetched at its pinned version; run node scripts/fetch-external.ts" }]);
         continue;
       }
-      const result = await loadSkill(path.join(cache, pin.name));
+      const result = await loadSkill(path.join(cache, pin.name), { channel: options.channel ?? "full" });
       add(pin.name, result.issues);
       if (!result.skill) continue;
       if (result.skill.version !== pin.version) {
@@ -110,6 +113,9 @@ export async function collectSources(options: SourceOptions): Promise<Sources> {
   for (const skill of skills) {
     if (seen.has(skill.name)) add(skill.name, [{ file: "SKILL.md", message: "two sources publish a skill with this name" }]);
     seen.add(skill.name);
+  }
+  for (const name of missingLeavingSkill(skills)) {
+    add(name, [{ file: "SKILL.md", message: `[steering-migration] moves users onto Udibo, so it cannot be published until ${LEAVING_SKILL}, the skill that moves them off, is published with it` }]);
   }
   skills.sort((a, b) => compare(a.name, b.name));
   return { skills: issues.length > 0 ? [] : skills, issues };

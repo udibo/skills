@@ -6,7 +6,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { parseFrontmatter } from "./frontmatter.ts";
-import { classifyLines } from "./markdown.ts";
+import { fencedBlocks, SHELL_LANGUAGES } from "./markdown.ts";
 import { parseTargets } from "./skill.ts";
 import type { Target } from "./skill.ts";
 
@@ -24,8 +24,6 @@ export type SkillDocument = {
   strayCommands: ShellCommand[];
 };
 
-const SHELL_LANGUAGES = new Set(["sh", "bash", "shell", "zsh", "console"]);
-const TITLE = /\btitle="([^"]+)"/;
 const PACKAGE_COMMAND =
   /^(?:\$|>|PS[^>]*>|%)?\s*(?:(?:sudo|env|npm_config_\w+=\S+|\w+=\S+)\s+)*(?:npm|pnpm|yarn|bun|npx|pnpx|bunx|uvx|uv|pipx|pip3?|corepack|deno|node|curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)(?:\.cmd|\.exe|\.ps1)?(?:\s|$)/i;
 const EXACT_SPEC = /^((?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*)@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/;
@@ -324,26 +322,4 @@ async function stopProcess(child: ChildProcess): Promise<void> {
   const grace = setTimeout(() => child.kill("SIGKILL"), STOP_GRACE_MS);
   await exited;
   clearTimeout(grace);
-}
-
-type FencedBlock = { language: string; title: string | undefined; lines: string[]; firstLine: number; indent: number };
-
-function fencedBlocks(markdown: string): FencedBlock[] {
-  const blocks: FencedBlock[] = [];
-  let current: FencedBlock | undefined;
-  for (const entry of classifyLines(markdown)) {
-    if (entry.kind === "fence-delimiter") {
-      if (current) {
-        blocks.push(current);
-        current = undefined;
-      } else {
-        const indent = /^ */.exec(entry.text)?.[0].length ?? 0;
-        const info = entry.text.trim().replace(/^(`{3,}|~{3,})/, "").trim();
-        current = { language: (info.split(/\s+/)[0] ?? "").toLowerCase(), title: TITLE.exec(info)?.[1], lines: [], firstLine: entry.line + 1, indent };
-      }
-    } else if (entry.kind === "code" && current) {
-      current.lines.push(entry.text.replace(new RegExp(`^ {0,${current.indent}}`), ""));
-    }
-  }
-  return blocks;
 }
