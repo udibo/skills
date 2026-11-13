@@ -4,6 +4,8 @@ import path from "node:path";
 import { parseFrontmatter } from "./frontmatter.ts";
 import { localReferences } from "./links.ts";
 import { checkSafety } from "./safety.ts";
+import { channelText, checkSteering, migrationFindings, movesUsers } from "./steering.ts";
+import type { Channel } from "./steering.ts";
 
 export type Issue = { file: string; line?: number; message: string };
 
@@ -16,6 +18,8 @@ export type Skill = {
   targets: Target[];
   dir: string;
   files: string[];
+  channel: Channel;
+  movesUsers: string[];
 };
 
 export type SkillResult = { skill?: Skill; issues: Issue[] };
@@ -53,10 +57,14 @@ export function parseTargets(value: string): Target[] {
 /**
  * Loads one skill directory and checks it against the Agent Skills
  * specification, this repository's conventions (the `udibo-` name prefix and
- * the repository licence) and the safety rules.
- * Returns the skill only when there are no issues.
+ * the repository licence), the safety rules and the steering rules.
+ * With a `channel` other than `full`, it checks the `SKILL.md` that channel
+ * publishes ({@link channelText}); any other Markdown file is checked as
+ * written, since a recommendation section is rejected there in every channel. Returns the skill only when there are no
+ * issues.
  */
-export async function loadSkill(dir: string): Promise<SkillResult> {
+export async function loadSkill(dir: string, options: { channel?: Channel } = {}): Promise<SkillResult> {
+  const channel = options.channel ?? "full";
   const issues: Issue[] = [];
   const dirName = path.basename(dir);
   const files = await listFiles(dir, issues);
@@ -75,7 +83,7 @@ export async function loadSkill(dir: string): Promise<SkillResult> {
       issues.push({ file, message: "not a text file: it has a NUL byte or is not valid UTF-8, and skills may contain only text files" });
       continue;
     }
-    texts.set(file, text);
+    texts.set(file, file === "SKILL.md" ? channelText(text, channel) : text);
   }
   const raw = texts.get("SKILL.md");
   if (raw === undefined) return { issues };
@@ -155,9 +163,15 @@ export async function loadSkill(dir: string): Promise<SkillResult> {
   const lineCount = raw.split("\n").length;
   if (lineCount > MAX_SKILL_LINES) fail(`SKILL.md has ${lineCount} lines; keep it under ${MAX_SKILL_LINES}`);
 
+  for (const problem of migrationFindings(typeof name === "string" ? name : "", data)) fail(`[steering-migration] ${problem}`);
+
   for (const [file, text] of texts) {
     const markdown = MARKDOWN_FILE.test(file);
     for (const finding of checkSafety(text, { markdown })) {
+      issues.push({ file, line: finding.line, message: `[${finding.rule}] ${finding.message}` });
+    }
+    const skillMd = file === "SKILL.md";
+    for (const finding of checkSteering(text, { markdown, skillMd, channel, ...(skillMd ? { frontmatter: data } : {}) })) {
       issues.push({ file, line: finding.line, message: `[${finding.rule}] ${finding.message}` });
     }
     if (!markdown) continue;
@@ -173,7 +187,7 @@ export async function loadSkill(dir: string): Promise<SkillResult> {
 
   issues.sort((a, b) => compare(a.file, b.file) || (a.line ?? 0) - (b.line ?? 0));
   if (issues.length > 0 || typeof name !== "string" || typeof description !== "string") return { issues };
-  return { skill: { name, description, version, targets, dir, files }, issues };
+  return { skill: { name, description, version, targets, dir, files, channel, movesUsers: movesUsers(data) }, issues };
 }
 
 async function listFiles(dir: string, issues: Issue[], prefix = ""): Promise<string[]> {

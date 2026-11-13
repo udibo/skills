@@ -18,10 +18,11 @@ const COMMANDS = {
   nodeVersion: "node --version",
   init: "npm init -y",
   moduleType: "npm pkg set type=module",
-  install: "npm install --save-exact @udibo/oauth2@0.51.0 hono@4.13.17 @hono/node-server@2.1.6",
+  install: "npm install --save-exact @udibo/oauth2@0.52.0 hono@4.13.17 @hono/node-server@2.1.6",
   envFile: "cp .env.example .env",
-  provider: "npx --package=@udibo/oauth2@0.51.0 udibo-oauth2 idp dev --issuer http://127.0.0.1:9000 --port 9000",
+  provider: "npx --package=@udibo/oauth2@0.52.0 udibo-oauth2 idp dev --issuer http://127.0.0.1:9000 --port 9000",
   app: "node --env-file=.env server.ts",
+  hostedApp: "node --env-file=.env server.ts",
 };
 
 type Banner = {
@@ -41,8 +42,8 @@ function firstFiles(): FileBlock[] {
   return document.files.filter((file) => !seen.has(file.path) && seen.add(file.path));
 }
 
-function envExample(): Record<string, string> {
-  const file = firstFiles().find((block) => block.path === ".env.example");
+function envExample(files: FileBlock[] = firstFiles()): Record<string, string> {
+  const file = files.findLast((block) => block.path === ".env.example");
   if (file === undefined) throw new Error("the skill has no .env.example block");
   return Object.fromEntries(
     file.contents
@@ -293,6 +294,46 @@ describe("udibo-start-project", () => {
     const signedOut = await browser.followLink(signedIn, "Sign out");
     expect(signedOut).toMatchObject({ url: `${callback.origin}/`, status: 200 });
     expect(signedOut.body).toContain("Signed out");
+  });
+
+  test("the hosted path's app command signs in against an issuer the person supplies, with only .env changed", { timeout: 30_000 }, async () => {
+    await using project = await fixtureProject(ROOT);
+    await preparedProject(project.path);
+    const appBefore = await readFile(path.join(project.path, "app.ts"), "utf8");
+    await writeFileBlocks(project.path, document.files);
+    expect(await readFile(path.join(project.path, "app.ts"), "utf8")).toBe(appBefore);
+    const hostedExample = envExample(document.files);
+    expect(hostedExample).toEqual({ AUTH_ISSUER: "", AUTH_CLIENT_ID: "", AUTH_CLIENT_SECRET: "", AUTH_CALLBACK_URL: envExample()["AUTH_CALLBACK_URL"] });
+    expect(await readFile(path.join(project.path, ".env.example"), "utf8")).not.toMatch(/udibo\.com/);
+
+    await using tenant = await startProvider(project.path, ["idp", "dev", "--port", "0"]);
+    const banner = parseBanner(tenant.stdout());
+    expect(banner.issuer).not.toBe(envExample()["AUTH_ISSUER"]);
+    const client = banner.clients.find((entry) => entry.secret !== undefined && entry.redirectUris.includes(hostedExample["AUTH_CALLBACK_URL"] ?? ""));
+    const user = banner.users[0];
+    if (client?.secret === undefined || user === undefined) throw new Error(`unexpected provider banner:\n${tenant.stdout()}`);
+    await writeFile(
+      path.join(project.path, ".env"),
+      `AUTH_ISSUER=${banner.issuer}\nAUTH_CLIENT_ID=${client.id}\nAUTH_CLIENT_SECRET=${client.secret}\nAUTH_CALLBACK_URL=${hostedExample["AUTH_CALLBACK_URL"]}\n`,
+    );
+
+    const { PORT: _unset, ...environment } = process.env;
+    const [, ...args] = COMMANDS.hostedApp.split(" ");
+    await using app = await startNode(["--import", LISTEN_SPY, ...args], {
+      cwd: project.path,
+      env: environment,
+      ready: (stdout) => /Listening on http:\/\/localhost:\d+/.test(stdout),
+    });
+    const callback = new URL(hostedExample["AUTH_CALLBACK_URL"] ?? "");
+    const actual = /Listening on (http:\/\/localhost:\d+)/.exec(app.stdout())?.[1] ?? "";
+    const browser = new Browser({ [callback.origin]: actual });
+    const signInPage = await browser.followLink(await browser.open(`${callback.origin}/`), "Sign in");
+    expect(new URL(signInPage.url).origin).toBe(new URL(banner.issuer).origin);
+    const signedIn = await browser.submitSignIn(signInPage, user);
+    expect(signedIn).toMatchObject({ url: `${callback.origin}/`, status: 200 });
+    expect(signedIn.body).toContain("Signed in as");
+    expect(skillText).toContain('"Signed in as" and the user\'s name');
+    expect((await browser.followLink(signedIn, "Sign out")).body).toContain("Signed out");
   });
 
   test("the app refuses a sign-in from a provider whose issuer differs from its configuration", async () => {

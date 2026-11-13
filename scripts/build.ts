@@ -6,6 +6,7 @@ import { renderOutputs } from "./lib/outputs.ts";
 import { collectSources } from "./lib/sources.ts";
 import { writeTracked } from "./lib/tracked.ts";
 import type { SourceIssue, SourceOptions } from "./lib/sources.ts";
+import { CHANNELS } from "./lib/steering.ts";
 
 export type BuildOptions = SourceOptions & { outDir: string; trackedDir?: string };
 
@@ -23,7 +24,8 @@ export function repositorySources(root: string): SourceOptions {
 /**
  * Validates every source skill and, only when all are valid, replaces
  * `outDir` with the discovery index, the skill artifacts it names and the
- * plugin marketplace tree. With `trackedDir`, also replaces the generated
+ * plugin marketplace tree, as the copies `channel` publishes (`full` by
+ * default). With `trackedDir`, also replaces the generated
  * marketplace directories at that repository root (`.claude-plugin/`,
  * `.cursor-plugin/`, `plugins/`). Writes nothing when any source has an issue.
  */
@@ -46,17 +48,33 @@ export function formatIssue(issue: SourceIssue): string {
   return `${issue.skill}/${issue.file}${issue.line === undefined ? "" : `:${issue.line}`}: ${issue.message}`;
 }
 
-/** CLI entry: `node scripts/build.ts`. */
-export async function main(root: string = process.cwd()): Promise<number> {
-  const result = await build({ ...repositorySources(root), outDir: path.join(root, "dist"), trackedDir: root });
+/**
+ * CLI entry: `node scripts/build.ts [--channel <name>]`. The default `full`
+ * channel writes `dist/` and the committed marketplace tree; any other channel
+ * writes only `dist/channels/<name>/`.
+ */
+export async function main(root: string = process.cwd(), argv: string[] = []): Promise<number> {
+  const flag = argv.indexOf("--channel");
+  const requested = flag === -1 ? "full" : argv[flag + 1];
+  const channel = CHANNELS.find((entry) => entry === requested);
+  if (channel === undefined) {
+    console.error(`--channel must be one of ${CHANNELS.join(", ")}`);
+    return 2;
+  }
+  const result = await build(
+    channel === "full"
+      ? { ...repositorySources(root), outDir: path.join(root, "dist"), trackedDir: root }
+      : { ...repositorySources(root), channel, outDir: path.join(root, "dist", "channels", channel) },
+  );
   if (result.issues.length > 0) {
     result.issues.forEach((issue) => console.error(formatIssue(issue)));
     return 1;
   }
-  console.log(`Built ${result.skills.length} skill(s) into dist/ (${result.files.length} files).`);
+  const where = channel === "full" ? "dist/" : `dist/channels/${channel}/`;
+  console.log(`Built ${result.skills.length} skill(s) into ${where} (${result.files.length} files).`);
   return 0;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exitCode = await main();
+  process.exitCode = await main(process.cwd(), process.argv.slice(2));
 }

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Skill } from "./skill.ts";
+import { channelText } from "./steering.ts";
 import { createTarGz } from "./tar.ts";
 
 export const DISCOVERY_SCHEMA_URI = "https://schemas.agentskills.io/discovery/0.2.0/schema.json";
@@ -46,7 +47,7 @@ export async function renderOutputs(skills: Skill[]): Promise<Map<string, Buffer
   const entries: IndexEntry[] = [];
   for (const skill of skills) {
     const files = await Promise.all(
-      skill.files.map(async (file) => ({ path: file, data: await readFile(path.join(skill.dir, file)) })),
+      skill.files.map(async (file) => ({ path: file, data: await channelFile(skill, file) })),
     );
     let artifactPath: string;
     let artifact: Buffer;
@@ -76,6 +77,11 @@ export async function renderOutputs(skills: Skill[]): Promise<Map<string, Buffer
 
   for (const [file, data] of renderManifests(skills.length > 0)) outputs.set(file, data);
   return new Map([...outputs.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+}
+
+async function channelFile(skill: Skill, file: string): Promise<Buffer> {
+  const data = await readFile(path.join(skill.dir, file));
+  return /\.(?:md|markdown|mdx)$/i.test(file) && skill.channel !== "full" ? Buffer.from(channelText(data.toString("utf8"), skill.channel), "utf8") : data;
 }
 
 /**

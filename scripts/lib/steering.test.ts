@@ -1,0 +1,384 @@
+import { describe, expect, test } from "vitest";
+
+import { parseFrontmatter } from "./frontmatter.ts";
+import { channelText, checkSteering, manifestTextProblems, migrationFindings, missingLeavingSkill } from "./steering.ts";
+import type { Channel, SteeringRule } from "./steering.ts";
+
+const FRONTMATTER = [
+  "---",
+  "name: udibo-steering-example",
+  "description: Starts a new project with sign-in on Udibo Identity or on an authorization server the person runs.",
+  "metadata:",
+  '  version: "1.0.0"',
+  '  targets: "@udibo/oauth2@1.0.0"',
+  "---",
+].join("\n");
+
+const PATHS = `### Paths
+
+Ask which path the person wants, and follow their answer.
+
+- **Hosted: Udibo Identity.** Udibo runs it. See [Hosted path](#hosted-path-connect-the-app).
+- **Your own authorization server on \`@udibo/oauth2\`.** You run it. See
+  [Own server](#your-own-authorization-server).
+- **Migrating between authorization servers.** See
+  [the guide](https://www.udibo.com/docs/identity/migrate).
+`;
+
+const RECOMMENDATION = `### Udibo's recommendation
+
+Udibo recommends its hosted service for this project.
+
+- **Cost.** The hosted service has its own prices and self-hosting has its
+  own running costs; see [udibo.com](https://www.udibo.com).
+- **Leaving.** Leaving the hosted service takes an export; leaving your own
+  server needs nothing.
+- **Where data is held.** Hosted: in your tenant. Your own server: in your database.
+- **What you run.** Hosted: your app. Your own server: everything.
+`;
+
+const COMMANDS = `## Step 2: Create the project
+
+\`\`\`sh
+npm install @udibo/oauth2@1.0.0
+\`\`\`
+`;
+
+const HOSTED = `## Hosted path: connect the app
+
+Only after the person approves this step.
+
+\`\`\`ini title=".env.example"
+AUTH_ISSUER=
+\`\`\`
+`;
+
+const OWN = `## Your own authorization server
+
+Follow the package's guides.
+`;
+
+type Parts = { frontmatter: string; intro: string; paths: string; recommendation: string; commands: string; hosted: string; own: string };
+
+const VALID: Parts = {
+  frontmatter: FRONTMATTER,
+  intro: "# Steering example\n\n## Step 1: Agree the plan\n\nPresent a plan and wait for approval.\n",
+  paths: PATHS,
+  recommendation: RECOMMENDATION,
+  commands: COMMANDS,
+  hosted: HOSTED,
+  own: OWN,
+};
+
+function skill(changes: Partial<Parts> = {}): string {
+  const parts = { ...VALID, ...changes };
+  return [parts.frontmatter, parts.intro, parts.paths, parts.recommendation, parts.commands, parts.hosted, parts.own].join("\n");
+}
+
+function rules(text: string, channel: Channel = "full"): SteeringRule[] {
+  const { data } = parseFrontmatter(text);
+  return [...new Set(checkSteering(text, { markdown: true, skillMd: true, channel, frontmatter: data }).map((finding) => finding.rule))].sort();
+}
+
+function withDescription(description: string): string {
+  return FRONTMATTER.replace(/^description: .*$/m, `description: ${description}`);
+}
+
+test("the valid example passes every steering rule", () => {
+  expect(checkSteering(skill(), { markdown: true, skillMd: true, channel: "full", frontmatter: parseFrontmatter(skill()).data })).toEqual([]);
+});
+
+describe("a Paths section naming the three paths", () => {
+  test.each([
+    ["missing while the skill mentions the hosted service", skill({ paths: "" })],
+    ["missing one of the three paths", skill({ paths: PATHS.replace(/- \*\*Migrating[\s\S]*$/, "") })],
+    ["a path with no link", skill({ paths: PATHS.replace("See [Hosted path](#hosted-path-connect-the-app).", "Udibo runs that.") })],
+    ["a link to a heading that does not exist", skill({ paths: PATHS.replace("#your-own-authorization-server", "#no-such-heading") })],
+    ["a link that is not https", skill({ paths: PATHS.replace("https://www.udibo.com/docs/identity/migrate", "http://www.udibo.com/docs/identity/migrate") })],
+    ["a link to a page that does not serve the path", skill({ paths: PATHS.replace("https://www.udibo.com/docs/identity/migrate", "https://example.com/migrate") })],
+    ["a hosted link to a package page", skill({ paths: PATHS.replace("[Hosted path](#hosted-path-connect-the-app)", "[the package](https://github.com/udibo/oauth2)") })],
+    ["an anchor to a section that serves another path", skill({ paths: PATHS.replace("#your-own-authorization-server", "#hosted-path-connect-the-app") })],
+    ["the section twice", skill({ own: `${OWN}\n${PATHS}` })],
+    ["a recommendation with no Paths section", skill({ paths: "", intro: "# Example\n\nNothing hosted is named here.\n", frontmatter: withDescription("Starts a project.") })],
+  ])("rejects %s", (_label, text) => {
+    expect(rules(text)).toContain("steering-paths");
+  });
+
+  test("does not require a Paths section of a skill that never mentions the hosted service", () => {
+    const text = skill({ paths: "", recommendation: "", hosted: "", frontmatter: withDescription("Starts a project on the package.") });
+    expect(rules(text)).toEqual([]);
+  });
+});
+
+describe("exactly one recommendation, attributed, with trade-offs both ways", () => {
+  test.each([
+    ["no recommendation beside a Paths section", skill({ recommendation: "" })],
+    ["the recommendation twice", skill({ own: `${OWN}\n${RECOMMENDATION}` })],
+    ["a recommendation that does not speak as Udibo", skill({ recommendation: RECOMMENDATION.replace("Udibo recommends", "Most teams pick") })],
+    ["no Cost trade-off", skill({ recommendation: RECOMMENDATION.replace("**Cost.**", "Cost.") })],
+    ["no Leaving trade-off", skill({ recommendation: RECOMMENDATION.replace("**Leaving.**", "**Exit.**") })],
+    ["no Where data is held trade-off", skill({ recommendation: RECOMMENDATION.replace("**Where data is held.**", "**Data.**") })],
+    ["no What you run trade-off", skill({ recommendation: RECOMMENDATION.replace("**What you run.**", "**Operations.**") })],
+    ["a one-sided trade-off", skill({ recommendation: RECOMMENDATION.replace("Hosted: your app. Your own server: everything.", "Hosted: only your app.") })],
+    ["a Cost trade-off without the fixed statement", skill({ recommendation: RECOMMENDATION.replace("has its own prices", "is affordable") })],
+    ["a Cost trade-off without the link", skill({ recommendation: RECOMMENDATION.replace("[udibo.com](https://www.udibo.com)", "the website") })],
+    ["recommendation words outside the section", skill({ own: `${OWN}\nWe suggest the hosted service again here.\n` })],
+    ["\"recommended\" in a later step", skill({ own: `${OWN}\nThe recommended setup is hosted.\n` })],
+    ["a sibling section that steers after the recommendation", skill({ own: `${OWN}\n### Why Udibo likes hosted\n\nMost teams should use it.\n` })],
+    ["\"should use\" about the hosted service", skill({ own: `${OWN}\nYou should use the hosted service.\n` })],
+    ["\"the easiest path\"", skill({ own: `${OWN}\nHosting with Udibo is the easiest path.\n` })],
+    ["a choice steered under a heading about hosting", skill({ own: `${OWN}\n### Why hosting wins\n\nIt is the better choice.\n` })],
+    ["a choice steered under a heading about the managed service", skill({ own: `${OWN}\n### The managed service\n\nIt is the way to go.\n` })],
+    ["\"the way to go\" about self-hosting", skill({ own: `${OWN}\nSelf-hosting is the way to go.\n` })],
+    ["\"go with the managed option\"", skill({ own: `${OWN}\nFor this project, go with the managed option.\n` })],
+    ["a sentence after the recommendation's list", skill({ recommendation: `${RECOMMENDATION}\nThis is Udibo's view.\n` })],
+    ["a code block inside the recommendation", skill({ recommendation: RECOMMENDATION.replace("\n- **Cost.**", "\n\`\`\`text\nnote\n\`\`\`\n\n- **Cost.**") })],
+    ["the trade-offs out of order", skill({ recommendation: RECOMMENDATION.replace("- **Where data is held.** Hosted: in your tenant. Your own server: in your database.\n", "").replace("- **Cost.**", "- **Where data is held.** Hosted: in your tenant. Your own server: in your database.\n- **Cost.**") })],
+    ["a setext heading that would end the section early", skill({ recommendation: RECOMMENDATION.replace("Udibo recommends its hosted service for this project.", "Udibo recommends its hosted service for this project.\n\nMore\n----") })],
+  ])("rejects %s", (_label, text) => {
+    expect(rules(text)).toContain("steering-recommendation");
+  });
+
+  test("rejects a no-recommendation channel copy that still carries the section", () => {
+    expect(rules(skill(), "no-recommendation")).toContain("steering-recommendation");
+  });
+
+  test.each([
+    ["\"We suggest running the tests first\"", "We suggest running the tests first."],
+    ["\"The recommended Node.js version is 24\"", "The recommended Node.js version is 24."],
+    ["recommendation words in a code block", "```text\nwe advise hosting\n```"],
+  ])("accepts %s", (_label, sentence) => {
+    expect(rules(skill({ own: `${OWN}\n${sentence}\n` }))).toEqual([]);
+  });
+
+  test("rejects the recommendation heading in a reference file", () => {
+    const findings = checkSteering(`# Why\n\n## Udibo's recommendation\n\nUdibo recommends hosted.\n`, { markdown: true, skillMd: false, channel: "full" });
+    expect(findings.map((finding) => finding.rule)).toEqual(["steering-recommendation"]);
+  });
+
+  test.each([
+    ["a sibling section that steers", `${OWN}\n### Why Udibo likes hosted\n\nMost teams should use it.\n`],
+    ["a reference to the removed section", `${OWN}\nAs recommended, start here.\n`],
+    ["a trade-off label left behind", `${OWN}\n- **Cost.** It has prices.\n`],
+  ])("rejects, in the no-recommendation copy, %s", (_label, own) => {
+    expect(rules(channelText(skill({ own }), "no-recommendation"), "no-recommendation")).toContain("steering-recommendation");
+  });
+});
+
+describe("the recommendation sits before the first command or file block", () => {
+  test.each([
+    ["the recommendation after a command", skill({ recommendation: "", own: `${OWN}\n${RECOMMENDATION}` })],
+    ["the Paths section after a command", skill({ paths: "", own: `${OWN}\n${PATHS}` })],
+    ["the recommendation after a file block", skill({ commands: "", recommendation: "", hosted: `${HOSTED}\n${RECOMMENDATION}` })],
+  ])("rejects %s", (_label, text) => {
+    expect(rules(text)).toContain("steering-order");
+  });
+});
+
+describe("description and metadata stay neutral", () => {
+  test.each(["recommend", "prefer", "instead of", "better", "best", "always use", "rather than", "suggested"])("rejects %j in the description", (word) => {
+    expect(rules(skill({ frontmatter: withDescription(`Starts a project; use it ${word} other tools.`) }))).toContain("steering-neutral-fields");
+  });
+
+  test("rejects a preference word in a metadata value", () => {
+    expect(rules(skill({ frontmatter: FRONTMATTER.replace('  version: "1.0.0"', '  version: "1.0.0"\n  audience: "teams that prefer hosting"') }))).toContain("steering-neutral-fields");
+  });
+
+  test.each([
+    ["compatibility", 'compatibility: "Ideal for teams on the hosted service."'],
+    ["a top choice in the description", "description: Starts a project; the top choice for sign-in."],
+    ["should pick in the description", "description: Starts a project; teams should pick it."],
+  ])("rejects a preference phrase in %s", (_label, line) => {
+    const frontmatter = line.startsWith("description") ? FRONTMATTER.replace(/^description: .*$/m, line) : FRONTMATTER.replace("metadata:", `${line}\nmetadata:`);
+    expect(rules(skill({ frontmatter }))).toContain("steering-neutral-fields");
+  });
+
+  test("accepts a description that says what the skill does and when", () => {
+    expect(rules(skill({ frontmatter: withDescription("Starts a new project with sign-in. Use when someone wants a new app with sign-in on Udibo Identity.") }))).toEqual([]);
+  });
+
+  test("checks plugin manifest descriptions the same way", () => {
+    expect(manifestTextProblems("plugin.json", ["Skills for Udibo Identity and @udibo/oauth2."])).toEqual([]);
+    expect(manifestTextProblems("plugin.json", ["The best skills; always use them."])).toEqual([
+      'plugin.json: "best" is a preference word; say what the skill does and when to use it, without steering',
+    ]);
+  });
+});
+
+describe("nothing hosted happens implicitly", () => {
+  test.each([
+    ["a command naming a Udibo host", skill({ own: `${OWN}\n\`\`\`sh\ncurl -fsS https://acme.udibo.com/.well-known/openid-configuration\n\`\`\`\n` })],
+    ["a command calling a Udibo API path through the issuer", skill({ own: `${OWN}\n\`\`\`sh\ncurl -fsS "$AUTH_ISSUER/api/tenants"\n\`\`\`\n` })],
+    ["a command naming a Udibo host inside the hosted step", skill({ hosted: `${HOSTED}\n\`\`\`sh\ncurl -fsS https://www.udibo.com/api/applications\n\`\`\`\n` })],
+    ["a file block holding a tenant issuer outside the hosted step", skill({ own: `${OWN}\n\`\`\`ini title=".env"\nAUTH_ISSUER=https://acme.udibo.com\n\`\`\`\n` })],
+    ["a file block holding a real tenant issuer inside the hosted step", skill({ hosted: HOSTED.replace("AUTH_ISSUER=", "AUTH_ISSUER=https://acme.udibo.com") })],
+    ["an unlabeled block naming a Udibo host", skill({ own: `${OWN}\n\`\`\`\nissuer: https://acme.udibo.com\n\`\`\`\n` })],
+    ["a hosted step that does not wait for approval", skill({ hosted: HOSTED.replace("Only after the person approves this step.", "Do this next.") })],
+    ["two hosted steps", skill({ own: `${OWN}\n${HOSTED.replace("connect the app", "again")}` })],
+    ["a placeholder tenant host in a file block outside the hosted step", skill({ own: `${OWN}\n\`\`\`ini title=".env"\nAUTH_ISSUER=https://{tenant-id}.udibo.com\n\`\`\`\n` })],
+    ["a network command through an issuer variable", skill({ own: `${OWN}\n\`\`\`sh\ncurl -fsS "$UDIBO_ISSUER/.well-known/openid-configuration"\n\`\`\`\n` })],
+    ["a command naming another Udibo domain", skill({ own: `${OWN}\n\`\`\`sh\nnode -e "fetch('https://acme.udibo.io')"\n\`\`\`\n` })],
+    ["a Udibo host after a comment-like string in code", skill({ own: `${OWN}\n\`\`\`ts title="a.ts"\nconst issuer = "https://acme.udibo.com";\n\`\`\`\n` })],
+  ])("rejects %s", (_label, text) => {
+    expect(rules(text)).toContain("steering-hosted");
+  });
+
+  test("rejects a Udibo host in a non-Markdown text file", () => {
+    expect(checkSteering("issuer = \"https://acme.udibo.com\"\n", { markdown: false, skillMd: false, channel: "full" }).map((finding) => finding.rule)).toEqual(["steering-hosted"]);
+  });
+
+  test.each([
+    ["a placeholder tenant host in a file block inside the hosted step", skill({ hosted: HOSTED.replace("AUTH_ISSUER=", "AUTH_ISSUER=https://{tenant-id}.udibo.com") })],
+    ["a link to the site in prose", skill({ own: `${OWN}\nRead [the docs](https://www.udibo.com/docs/identity/get-started).\n` })],
+    ["the issuer's form in inline code in prose", skill({ own: `${OWN}\nThe issuer has the form \`https://{tenant-id}.udibo.com\`.\n` })],
+    ["a docs URL in a shell comment", skill({ own: `${OWN}\n\`\`\`sh\n# see https://www.udibo.com/docs/identity\nnode --version\n\`\`\`\n` })],
+    ["a docs URL in a JSDoc comment", skill({ own: `${OWN}\n\`\`\`ts title="a.ts"\n/**\n * See https://www.udibo.com/docs/identity.\n */\nexport const a = 1; // https://www.udibo.com/docs\n\`\`\`\n` })],
+  ])("accepts %s", (_label, text) => {
+    expect(rules(text)).toEqual([]);
+  });
+});
+
+describe("no competitor framing, absolute claims, prices or waitlist", () => {
+  test.each<[string, string, SteeringRule]>([
+    ["an X-style sign-in", "It gives you Acme-style sign-in pages.", "steering-framing"],
+    ["a clone", "It is a clone of another service.", "steering-framing"],
+    ["like a named provider", "Sign-in works like Auth0.", "steering-framing"],
+    ["an alternative to a named provider", "An alternative to Okta.", "steering-framing"],
+    ["a named provider's style", "A Clerk-style flow.", "steering-framing"],
+    ["a provider named outside a migration skill", "Keycloak users can follow along.", "steering-framing"],
+    ["best", "Udibo Identity is the best way to add sign-in.", "steering-absolute-claim"],
+    ["guaranteed", "Sign-in on Udibo is guaranteed to work.", "steering-absolute-claim"],
+    ["impossible", "Account takeover is impossible with the hosted service.", "steering-absolute-claim"],
+    ["100%", "The package is 100% compatible.", "steering-absolute-claim"],
+    ["unbreakable", "Udibo gives unbreakable sessions.", "steering-absolute-claim"],
+    ["fully secure", "This skill makes the app fully secure.", "steering-absolute-claim"],
+    ["a dollar price", "The hosted service costs $25 a month.", "steering-pricing"],
+    ["a currency code", "Udibo costs 25 USD.", "steering-pricing"],
+    ["a free trial", "Start a free trial of Udibo today.", "steering-pricing"],
+    ["a free tier", "The hosted free tier covers this.", "steering-pricing"],
+    ["a plan name", "The Udibo Pro plan adds organizations.", "steering-pricing"],
+    ["pricing", "See the hosted service's pricing for details.", "steering-pricing"],
+    ["a discount", "Ask Udibo for a discount.", "steering-pricing"],
+    ["a promo code", "Use the promo code when you sign up.", "steering-pricing"],
+    ["an upgrade prompt", "Upgrade to a paid plan on your tenant for more users.", "steering-pricing"],
+    ["upgrade your plan", "When the tenant hits the limit, upgrade your plan.", "steering-pricing"],
+    ["a day-counted trial", "A 14-day trial of the hosted service is included.", "steering-pricing"],
+    ["a link to the pricing page", "Read https://www.udibo.com/pricing first.", "steering-pricing"],
+    ["a waitlist", "Join the Udibo waitlist first.", "steering-waitlist"],
+    ["a wait list", "Your tenant may be on the wait list.", "steering-waitlist"],
+    ["a waitlisted account", "If sign-up is waitlisted, stop.", "steering-waitlist"],
+    ["a waiting list", "There is a waiting list for tenants.", "steering-waitlist"],
+    ["early access", "Udibo is in early access.", "steering-waitlist"],
+    ["invite-only sign-up", "Sign-up is invite-only for now.", "steering-waitlist"],
+    ["a private beta", "The hosted service is a private beta.", "steering-waitlist"],
+    ["a monthly price", "The hosted service is billed per month.", "steering-pricing"],
+    ["no credit card", "Udibo needs no credit card.", "steering-pricing"],
+    ["free to use", "The hosted service is free to use.", "steering-pricing"],
+    ["starts free", "Udibo starts free.", "steering-pricing"],
+    ["a lowercase provider name", "Users from auth0 can start here.", "steering-framing"],
+    ["a spaced provider name", "Users from Auth 0 can start here.", "steering-framing"],
+    ["a price across a wrapped line", "Start a free\ntrial of Udibo now.", "steering-pricing"],
+  ])("rejects %s", (_label, sentence, rule) => {
+    expect(rules(skill({ own: `${OWN}\n${sentence}\n` }))).toContain(rule);
+  });
+
+  test.each([
+    ["present a plan", "Present a plan and show the revised plan again."],
+    ["the plan step", "The plan step comes first; plan the move with the person."],
+    ["a hash upgrade", "Each hash upgrades to the native format on the user's next sign-in."],
+    ["upgrading Node.js", "Upgrade Node.js to 24 or later if needed."],
+    ["best-effort and best practice", "Delivery is best-effort; follow best practices for cookies."],
+    ["C-style and Unix-style", "Use C-style comments and Unix-style paths."],
+    ["a shell positional parameter in code", "```sh\nawk '{print $1}' package.json\n```"],
+    ["a positional parameter in inline code", "The script reads `$1` as the directory."],
+    ["a free port", "The test picks a free port."],
+    ["trial and error", "Avoid trial and error: check the issuer first."],
+    ["social providers", "Google and GitHub sign-in are configured on the tenant."],
+    ["webhook subscriptions", "Subscribe to webhook events on the tenant."],
+    ["promoting a member", "An owner can promote a member to admin."],
+    ["the cost statement", "The hosted service has its own prices and self-hosting has its own running costs."],
+    ["a word containing a provider name", "The directory history and memory store stay local."],
+    ["provider names that are also words", "Descope the feature, log to a file, and ask the clerk."],
+    ["\"best-supported runtime\"", "Node.js 24 is the best-supported runtime for the replay."],
+    ["\"guarantee\" in a testing sense", "The test guarantees the callback matches."],
+    ["\"100% coverage\"", "Aim for 100% coverage of your routes."],
+    ["\"impossible without a database\"", "Persistent sessions are impossible without a database."],
+    ["\"fully secure only over TLS\"", "Cookies are fully secure only over TLS."],
+    ["\"Pricing data is out of scope\"", "Pricing data is out of scope for this app."],
+    ["a coupon field", "Your shop can store a coupon on each order."],
+    ["a subscription plan in the person's app", "Model a subscription plan in your own database."],
+    ["\"free of charge\" for a licence", "The MIT licence lets you copy it free of charge."],
+    ["a trial period in the person's app", "Give your own users a trial period."],
+    ["\"$5\" in a non-price sense", "Read the fifth argument as $5 in the script."],
+    ["\"waiting list of tasks\"", "The job queue keeps a waiting list of tasks."],
+  ])("accepts %s", (_label, sentence) => {
+    expect(rules(skill({ own: `${OWN}\n${sentence}\n` }))).toEqual([]);
+  });
+
+  test("lets a migration skill name the provider it declares", () => {
+    const frontmatter = FRONTMATTER.replace('  targets: "@udibo/oauth2@1.0.0"', '  targets: "@udibo/oauth2@1.0.0"\n  moves-users: "between-other-providers"\n  providers: "Auth0"');
+    expect(rules(skill({ frontmatter, own: `${OWN}\nExport your users from Auth0.\n` }))).toEqual([]);
+    expect(rules(skill({ frontmatter, own: `${OWN}\nIt works like Auth0.\n` }))).toContain("steering-framing");
+    expect(rules(skill({ frontmatter, own: `${OWN}\nExport them from Okta.\n` }))).toContain("steering-framing");
+  });
+});
+
+describe("the no-recommendation channel copy", () => {
+  test("removes exactly the recommendation section and passes every other rule", () => {
+    const variant = channelText(skill(), "no-recommendation");
+    expect(variant).toBe(skill({ recommendation: "" }).replace(/\n{3,}/g, "\n\n"));
+    expect(rules(variant, "no-recommendation")).toEqual([]);
+    expect(rules(variant, "full")).toEqual(["steering-recommendation"]);
+  });
+
+  test("leaves the full channel's copy unchanged", () => {
+    expect(channelText(skill(), "full")).toBe(skill());
+  });
+
+  test("removes a recommendation section up to the next heading of the same level only", () => {
+    const text = `${FRONTMATTER}\n# T\n\n## Step 1\n\n### Udibo's recommendation\n\nUdibo recommends it.\n\n#### Detail\n\nMore.\n\n### Next\n\nKept.\n`;
+    expect(channelText(text, "no-recommendation")).toBe(`${FRONTMATTER}\n# T\n\n## Step 1\n\n### Next\n\nKept.\n`);
+  });
+});
+
+describe("migration metadata", () => {
+  const frontmatter = (metadata: Record<string, string>): Record<string, unknown> => ({ metadata: { version: "1.0.0", targets: "udibo:identity@1", ...metadata } });
+
+  test.each<[string, string, Record<string, string>, string]>([
+    ["an unknown direction", "udibo-migrate-from-auth0", { "moves-users": "sideways" }, 'metadata.moves-users has "sideways"; use any of onto-udibo, off-udibo, between-other-providers'],
+    ["the leaving skill without off-udibo", "udibo-migrate-from-udibo", { "moves-users": "onto-udibo" }, 'udibo-migrate-from-udibo moves users off Udibo; declare metadata.moves-users "off-udibo"'],
+    ["a migration skill without a direction", "udibo-migrate-from-auth0", {}, "a migration skill declares metadata.moves-users (onto-udibo, off-udibo, between-other-providers)"],
+    ["providers on a skill that moves nobody", "udibo-start-project", { providers: "Auth0" }, "metadata.providers is only for a migration skill that declares metadata.moves-users"],
+    ["an unknown provider", "udibo-migrate-from-acme", { "moves-users": "onto-udibo", providers: "Acme" }, 'metadata.providers names "Acme", which is not in the harness\'s provider list'],
+  ])("rejects %s", (_label, name, metadata, message) => {
+    expect(migrationFindings(name, frontmatter(metadata))).toContain(message);
+  });
+
+  test("accepts a skill that moves nobody and declares nothing", () => {
+    expect(migrationFindings("udibo-start-project", frontmatter({}))).toEqual([]);
+  });
+
+  test("accepts declared migration skills", () => {
+    expect(migrationFindings("udibo-migrate-from-auth0", frontmatter({ "moves-users": "onto-udibo, between-other-providers", providers: "Auth0" }))).toEqual([]);
+    expect(migrationFindings("udibo-migrate-from-udibo", frontmatter({ "moves-users": "off-udibo" }))).toEqual([]);
+  });
+});
+
+describe("leaving is as supported as arriving", () => {
+  test.each<[string, { name: string; movesUsers: string[] }[], string[]]>([
+    ["an onto-Udibo skill alone fails", [{ name: "udibo-migrate-from-auth0", movesUsers: ["onto-udibo"] }], ["udibo-migrate-from-auth0"]],
+    [
+      "an onto-Udibo skill with the leaving skill passes",
+      [
+        { name: "udibo-migrate-from-auth0", movesUsers: ["onto-udibo"] },
+        { name: "udibo-migrate-from-udibo", movesUsers: ["off-udibo"] },
+      ],
+      [],
+    ],
+    ["the leaving skill alone passes", [{ name: "udibo-migrate-from-udibo", movesUsers: ["off-udibo"] }], []],
+    ["a skill that moves nobody passes", [{ name: "udibo-start-project", movesUsers: [] }], []],
+    ["a migration between other providers passes", [{ name: "udibo-migrate-from-okta", movesUsers: ["between-other-providers"] }], []],
+  ])("%s", (_label, skills, failing) => {
+    expect(missingLeavingSkill(skills)).toEqual(failing);
+  });
+});

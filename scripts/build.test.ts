@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { expect, test, vi } from "vitest";
 
 import { build, main } from "./build.ts";
 import { readTarGz } from "./lib/tar.ts";
-import { copyPlaceholders, skillMd, tempDir, writeSkill } from "./lib/testing.ts";
+import { copyPlaceholders, FIXTURES, skillMd, tempDir, writeSkill } from "./lib/testing.ts";
+import { verifyDist } from "./lib/verify.ts";
 
 
 async function filesUnder(dir: string, prefix = ""): Promise<string[]> {
@@ -143,4 +144,69 @@ test("writes the marketplace into the tracked tree at the repository root, plugi
   await rm(path.join(dir.path, "skills"), { recursive: true });
   await build({ skillsDir, outDir: path.join(dir.path, "dist"), trackedDir: dir.path });
   expect(JSON.parse(await readFile(path.join(dir.path, ".claude-plugin/marketplace.json"), "utf8")).plugins).toEqual([]);
+});
+
+const STEERING = path.join(FIXTURES, "steering-skills");
+
+test("refuses to publish a skill that moves users onto Udibo without the skill that moves them off", async () => {
+  await using dir = await tempDir();
+  const skillsDir = path.join(dir.path, "skills");
+  await cp(path.join(STEERING, "udibo-migrate-from-example"), path.join(skillsDir, "udibo-migrate-from-example"), { recursive: true });
+  const result = await build({ skillsDir, outDir: path.join(dir.path, "dist") });
+  expect(result.issues).toEqual([
+    {
+      skill: "udibo-migrate-from-example",
+      file: "SKILL.md",
+      message: "[steering-migration] moves users onto Udibo, so it cannot be published until udibo-migrate-from-udibo, the skill that moves them off, is published with it",
+    },
+  ]);
+});
+
+test("publishes a skill that moves users onto Udibo together with the skill that moves them off", async () => {
+  await using dir = await tempDir();
+  const skillsDir = path.join(dir.path, "skills");
+  await cp(STEERING, skillsDir, { recursive: true });
+  const result = await build({ skillsDir, outDir: path.join(dir.path, "dist") });
+  expect(result.issues).toEqual([]);
+  expect(result.skills).toEqual(["udibo-migrate-from-example", "udibo-migrate-from-udibo"]);
+});
+
+test("publishes the skill that moves users off Udibo, and skills that move nobody, on their own", async () => {
+  await using dir = await tempDir();
+  const skillsDir = await copyPlaceholders(dir.path);
+  await cp(path.join(STEERING, "udibo-migrate-from-udibo"), path.join(skillsDir, "udibo-migrate-from-udibo"), { recursive: true });
+  expect((await build({ skillsDir, outDir: path.join(dir.path, "dist") })).issues).toEqual([]);
+});
+
+test("builds the no-recommendation channel's copies, with the section removed and the digest of the bytes served", async () => {
+  await using dir = await tempDir();
+  const skillsDir = path.join(dir.path, "skills");
+  await cp(path.join(import.meta.dirname, "..", "skills"), skillsDir, { recursive: true });
+  const outDir = path.join(dir.path, "variant");
+  const result = await build({ skillsDir, outDir, channel: "no-recommendation" });
+  expect(result.issues).toEqual([]);
+  expect(await verifyDist(outDir)).toEqual([]);
+  for (const name of result.skills) {
+    const served = await readFile(path.join(outDir, `.well-known/agent-skills/${name}/SKILL.md`), "utf8");
+    expect(served).not.toContain("Udibo's recommendation");
+    expect(served).not.toMatch(/recommend/i);
+    expect(await readFile(path.join(outDir, `plugin-marketplace/plugins/udibo/skills/${name}/SKILL.md`), "utf8")).toBe(served);
+  }
+});
+
+test("the CLI builds a channel into its own directory and leaves the committed tree alone", async () => {
+  await using dir = await tempDir();
+  await writeFile(path.join(dir.path, "external-skills.json"), '{ "skills": [] }\n');
+  using log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  using error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  expect(await main(dir.path, ["--channel", "no-recommendation"])).toBe(0);
+  expect(log).toHaveBeenCalledWith("Built 0 skill(s) into dist/channels/no-recommendation/ (3 files).");
+  expect(await filesUnder(dir.path)).toEqual([
+    "dist/channels/no-recommendation/.well-known/agent-skills/index.json",
+    "dist/channels/no-recommendation/plugin-marketplace/.claude-plugin/marketplace.json",
+    "dist/channels/no-recommendation/plugin-marketplace/.cursor-plugin/marketplace.json",
+    "external-skills.json",
+  ]);
+  expect(await main(dir.path, ["--channel", "other"])).toBe(2);
+  expect(error).toHaveBeenCalledWith("--channel must be one of full, no-recommendation");
 });

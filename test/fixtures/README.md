@@ -9,3 +9,7 @@ directory.
   for the real skills, which are written later.
 - `unsafe-skills/` holds a skill that breaks each safety rule, so the tests can
   show the checks reject it.
+- `steering-skills/` holds two placeholder migration skills: one that moves
+  users onto Udibo and the one that moves them off, so the tests can show a
+  skill moving users onto Udibo is published only with the skill that moves
+  them off.
