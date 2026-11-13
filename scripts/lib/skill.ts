@@ -58,8 +58,9 @@ export function parseTargets(value: string): Target[] {
  * Loads one skill directory and checks it against the Agent Skills
  * specification, this repository's conventions (the `udibo-` name prefix and
  * the repository licence), the safety rules and the steering rules.
- * With a `channel` other than `full`, it checks the copy that channel
- * publishes ({@link channelText}). Returns the skill only when there are no
+ * With a `channel` other than `full`, it checks the `SKILL.md` that channel
+ * publishes ({@link channelText}); any other Markdown file is checked as
+ * written, since a recommendation section is rejected there in every channel. Returns the skill only when there are no
  * issues.
  */
 export async function loadSkill(dir: string, options: { channel?: Channel } = {}): Promise<SkillResult> {
@@ -82,12 +83,10 @@ export async function loadSkill(dir: string, options: { channel?: Channel } = {}
       issues.push({ file, message: "not a text file: it has a NUL byte or is not valid UTF-8, and skills may contain only text files" });
       continue;
     }
-    texts.set(file, text);
+    texts.set(file, file === "SKILL.md" ? channelText(text, channel) : text);
   }
-  const source = texts.get("SKILL.md");
-  if (source === undefined) return { issues };
-  const raw = channelText(source, channel);
-  texts.set("SKILL.md", raw);
+  const raw = texts.get("SKILL.md");
+  if (raw === undefined) return { issues };
   if (raw.includes("\r")) {
     return { issues: [...issues, { file: "SKILL.md", message: "use LF line endings" }] };
   }

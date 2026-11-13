@@ -81,7 +81,7 @@ export async function renderOutputs(skills: Skill[]): Promise<Map<string, Buffer
 
 async function channelFile(skill: Skill, file: string): Promise<Buffer> {
   const data = await readFile(path.join(skill.dir, file));
-  return file === "SKILL.md" && skill.channel !== "full" ? Buffer.from(channelText(data.toString("utf8"), skill.channel), "utf8") : data;
+  return /\.(?:md|markdown|mdx)$/i.test(file) && skill.channel !== "full" ? Buffer.from(channelText(data.toString("utf8"), skill.channel), "utf8") : data;
 }
 
 /**

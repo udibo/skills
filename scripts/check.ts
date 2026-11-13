@@ -59,11 +59,17 @@ export async function check(options: CheckOptions): Promise<string[]> {
   return problems;
 }
 
-/** Every `description`, at any depth, of a parsed manifest: the text a directory or a model reads. */
+const MANIFEST_TEXT_KEYS = new Set(["description", "displayName", "shortDescription", "longDescription", "keywords", "tags", "category"]);
+
+/** Every free-text field, at any depth, of a parsed manifest: the text a directory or a model reads. */
 export function manifestTexts(value: unknown): string[] {
   if (Array.isArray(value)) return value.flatMap(manifestTexts);
   if (value === null || typeof value !== "object") return [];
-  return Object.entries(value).flatMap(([key, entry]) => (key === "description" && typeof entry === "string" ? [entry] : manifestTexts(entry)));
+  return Object.entries(value).flatMap(([key, entry]) => {
+    if (!MANIFEST_TEXT_KEYS.has(key)) return manifestTexts(entry);
+    if (typeof entry === "string") return [entry];
+    return Array.isArray(entry) ? entry.filter((item): item is string => typeof item === "string") : manifestTexts(entry);
+  });
 }
 
 /** Compares two build outputs file by file; returns a message for each difference. */

@@ -22,7 +22,7 @@ Ask which path the person wants, and follow their answer.
 - **Your own authorization server on \`@udibo/oauth2\`.** You run it. See
   [Own server](#your-own-authorization-server).
 - **Migrating between authorization servers.** See
-  [the guide](https://example.com/migrate).
+  [the guide](https://www.udibo.com/docs/identity/migrate).
 `;
 
 const RECOMMENDATION = `### Udibo's recommendation
@@ -94,7 +94,10 @@ describe("a Paths section naming the three paths", () => {
     ["missing one of the three paths", skill({ paths: PATHS.replace(/- \*\*Migrating[\s\S]*$/, "") })],
     ["a path with no link", skill({ paths: PATHS.replace("See [Hosted path](#hosted-path-connect-the-app).", "Udibo runs that.") })],
     ["a link to a heading that does not exist", skill({ paths: PATHS.replace("#your-own-authorization-server", "#no-such-heading") })],
-    ["a link that is not https", skill({ paths: PATHS.replace("https://example.com/migrate", "http://example.com/migrate") })],
+    ["a link that is not https", skill({ paths: PATHS.replace("https://www.udibo.com/docs/identity/migrate", "http://www.udibo.com/docs/identity/migrate") })],
+    ["a link to a page that does not serve the path", skill({ paths: PATHS.replace("https://www.udibo.com/docs/identity/migrate", "https://example.com/migrate") })],
+    ["a hosted link to a package page", skill({ paths: PATHS.replace("[Hosted path](#hosted-path-connect-the-app)", "[the package](https://github.com/udibo/oauth2)") })],
+    ["an anchor to a section that serves another path", skill({ paths: PATHS.replace("#your-own-authorization-server", "#hosted-path-connect-the-app") })],
     ["the section twice", skill({ own: `${OWN}\n${PATHS}` })],
     ["a recommendation with no Paths section", skill({ paths: "", intro: "# Example\n\nNothing hosted is named here.\n", frontmatter: withDescription("Starts a project.") })],
   ])("rejects %s", (_label, text) => {
@@ -121,13 +124,40 @@ describe("exactly one recommendation, attributed, with trade-offs both ways", ()
     ["a Cost trade-off without the link", skill({ recommendation: RECOMMENDATION.replace("[udibo.com](https://www.udibo.com)", "the website") })],
     ["recommendation words outside the section", skill({ own: `${OWN}\nWe suggest the hosted service again here.\n` })],
     ["\"recommended\" in a later step", skill({ own: `${OWN}\nThe recommended setup is hosted.\n` })],
-    ["\"we advise\" in a code block", skill({ own: `${OWN}\n\`\`\`text\nwe advise hosting\n\`\`\`\n` })],
+    ["a sibling section that steers after the recommendation", skill({ own: `${OWN}\n### Why Udibo likes hosted\n\nMost teams should use it.\n` })],
+    ["\"should use\" about the hosted service", skill({ own: `${OWN}\nYou should use the hosted service.\n` })],
+    ["\"the easiest path\"", skill({ own: `${OWN}\nHosting with Udibo is the easiest path.\n` })],
+    ["a sentence after the recommendation's list", skill({ recommendation: `${RECOMMENDATION}\nThis is Udibo's view.\n` })],
+    ["a code block inside the recommendation", skill({ recommendation: RECOMMENDATION.replace("\n- **Cost.**", "\n\`\`\`text\nnote\n\`\`\`\n\n- **Cost.**") })],
+    ["the trade-offs out of order", skill({ recommendation: RECOMMENDATION.replace("- **Where data is held.** Hosted: in your tenant. Your own server: in your database.\n", "").replace("- **Cost.**", "- **Where data is held.** Hosted: in your tenant. Your own server: in your database.\n- **Cost.**") })],
+    ["a setext heading that would end the section early", skill({ recommendation: RECOMMENDATION.replace("Udibo recommends its hosted service for this project.", "Udibo recommends its hosted service for this project.\n\nMore\n----") })],
   ])("rejects %s", (_label, text) => {
     expect(rules(text)).toContain("steering-recommendation");
   });
 
   test("rejects a no-recommendation channel copy that still carries the section", () => {
-    expect(rules(skill(), "no-recommendation")).toEqual(["steering-recommendation"]);
+    expect(rules(skill(), "no-recommendation")).toContain("steering-recommendation");
+  });
+
+  test.each([
+    ["\"We suggest running the tests first\"", "We suggest running the tests first."],
+    ["\"The recommended Node.js version is 24\"", "The recommended Node.js version is 24."],
+    ["recommendation words in a code block", "```text\nwe advise hosting\n```"],
+  ])("accepts %s", (_label, sentence) => {
+    expect(rules(skill({ own: `${OWN}\n${sentence}\n` }))).toEqual([]);
+  });
+
+  test("rejects the recommendation heading in a reference file", () => {
+    const findings = checkSteering(`# Why\n\n## Udibo's recommendation\n\nUdibo recommends hosted.\n`, { markdown: true, skillMd: false, channel: "full" });
+    expect(findings.map((finding) => finding.rule)).toEqual(["steering-recommendation"]);
+  });
+
+  test.each([
+    ["a sibling section that steers", `${OWN}\n### Why Udibo likes hosted\n\nMost teams should use it.\n`],
+    ["a reference to the removed section", `${OWN}\nAs recommended, start here.\n`],
+    ["a trade-off label left behind", `${OWN}\n- **Cost.** It has prices.\n`],
+  ])("rejects, in the no-recommendation copy, %s", (_label, own) => {
+    expect(rules(channelText(skill({ own }), "no-recommendation"), "no-recommendation")).toContain("steering-recommendation");
   });
 });
 
@@ -148,6 +178,15 @@ describe("description and metadata stay neutral", () => {
 
   test("rejects a preference word in a metadata value", () => {
     expect(rules(skill({ frontmatter: FRONTMATTER.replace('  version: "1.0.0"', '  version: "1.0.0"\n  audience: "teams that prefer hosting"') }))).toContain("steering-neutral-fields");
+  });
+
+  test.each([
+    ["compatibility", 'compatibility: "Ideal for teams on the hosted service."'],
+    ["a top choice in the description", "description: Starts a project; the top choice for sign-in."],
+    ["should pick in the description", "description: Starts a project; teams should pick it."],
+  ])("rejects a preference phrase in %s", (_label, line) => {
+    const frontmatter = line.startsWith("description") ? FRONTMATTER.replace(/^description: .*$/m, line) : FRONTMATTER.replace("metadata:", `${line}\nmetadata:`);
+    expect(rules(skill({ frontmatter }))).toContain("steering-neutral-fields");
   });
 
   test("accepts a description that says what the skill does and when", () => {
@@ -172,6 +211,10 @@ describe("nothing hosted happens implicitly", () => {
     ["an unlabeled block naming a Udibo host", skill({ own: `${OWN}\n\`\`\`\nissuer: https://acme.udibo.com\n\`\`\`\n` })],
     ["a hosted step that does not wait for approval", skill({ hosted: HOSTED.replace("Only after the person approves this step.", "Do this next.") })],
     ["two hosted steps", skill({ own: `${OWN}\n${HOSTED.replace("connect the app", "again")}` })],
+    ["a placeholder tenant host in a file block outside the hosted step", skill({ own: `${OWN}\n\`\`\`ini title=".env"\nAUTH_ISSUER=https://{tenant-id}.udibo.com\n\`\`\`\n` })],
+    ["a network command through an issuer variable", skill({ own: `${OWN}\n\`\`\`sh\ncurl -fsS "$UDIBO_ISSUER/.well-known/openid-configuration"\n\`\`\`\n` })],
+    ["a command naming another Udibo domain", skill({ own: `${OWN}\n\`\`\`sh\nnode -e "fetch('https://acme.udibo.io')"\n\`\`\`\n` })],
+    ["a Udibo host after a comment-like string in code", skill({ own: `${OWN}\n\`\`\`ts title="a.ts"\nconst issuer = "https://acme.udibo.com";\n\`\`\`\n` })],
   ])("rejects %s", (_label, text) => {
     expect(rules(text)).toContain("steering-hosted");
   });
@@ -184,6 +227,8 @@ describe("nothing hosted happens implicitly", () => {
     ["a placeholder tenant host in a file block inside the hosted step", skill({ hosted: HOSTED.replace("AUTH_ISSUER=", "AUTH_ISSUER=https://{tenant-id}.udibo.com") })],
     ["a link to the site in prose", skill({ own: `${OWN}\nRead [the docs](https://www.udibo.com/docs/identity/get-started).\n` })],
     ["the issuer's form in inline code in prose", skill({ own: `${OWN}\nThe issuer has the form \`https://{tenant-id}.udibo.com\`.\n` })],
+    ["a docs URL in a shell comment", skill({ own: `${OWN}\n\`\`\`sh\n# see https://www.udibo.com/docs/identity\nnode --version\n\`\`\`\n` })],
+    ["a docs URL in a JSDoc comment", skill({ own: `${OWN}\n\`\`\`ts title="a.ts"\n/**\n * See https://www.udibo.com/docs/identity.\n */\nexport const a = 1; // https://www.udibo.com/docs\n\`\`\`\n` })],
   ])("accepts %s", (_label, text) => {
     expect(rules(text)).toEqual([]);
   });
@@ -197,29 +242,38 @@ describe("no competitor framing, absolute claims, prices or waitlist", () => {
     ["an alternative to a named provider", "An alternative to Okta.", "steering-framing"],
     ["a named provider's style", "A Clerk-style flow.", "steering-framing"],
     ["a provider named outside a migration skill", "Keycloak users can follow along.", "steering-framing"],
-    ["best", "The best way to add sign-in.", "steering-absolute-claim"],
-    ["guaranteed", "Sign-in is guaranteed to work.", "steering-absolute-claim"],
-    ["impossible", "Account takeover is impossible.", "steering-absolute-claim"],
-    ["100%", "It is 100% compatible.", "steering-absolute-claim"],
-    ["unbreakable", "Unbreakable sessions.", "steering-absolute-claim"],
-    ["fully secure", "The app is fully secure.", "steering-absolute-claim"],
+    ["best", "Udibo Identity is the best way to add sign-in.", "steering-absolute-claim"],
+    ["guaranteed", "Sign-in on Udibo is guaranteed to work.", "steering-absolute-claim"],
+    ["impossible", "Account takeover is impossible with the hosted service.", "steering-absolute-claim"],
+    ["100%", "The package is 100% compatible.", "steering-absolute-claim"],
+    ["unbreakable", "Udibo gives unbreakable sessions.", "steering-absolute-claim"],
+    ["fully secure", "This skill makes the app fully secure.", "steering-absolute-claim"],
     ["a dollar price", "The hosted service costs $25 a month.", "steering-pricing"],
-    ["a currency code", "It costs 25 USD.", "steering-pricing"],
-    ["a free trial", "Start a free trial today.", "steering-pricing"],
-    ["a free tier", "The free tier covers this.", "steering-pricing"],
-    ["a plan name", "The Pro plan adds organizations.", "steering-pricing"],
-    ["pricing", "See the pricing for details.", "steering-pricing"],
-    ["a discount", "Ask for a discount.", "steering-pricing"],
-    ["a promo code", "Use the promo code at checkout.", "steering-pricing"],
-    ["an upgrade prompt", "Upgrade to a paid plan for more users.", "steering-pricing"],
-    ["upgrade your plan", "When you hit the limit, upgrade your plan.", "steering-pricing"],
-    ["a day-counted trial", "A 14-day trial is included.", "steering-pricing"],
+    ["a currency code", "Udibo costs 25 USD.", "steering-pricing"],
+    ["a free trial", "Start a free trial of Udibo today.", "steering-pricing"],
+    ["a free tier", "The hosted free tier covers this.", "steering-pricing"],
+    ["a plan name", "The Udibo Pro plan adds organizations.", "steering-pricing"],
+    ["pricing", "See the hosted service's pricing for details.", "steering-pricing"],
+    ["a discount", "Ask Udibo for a discount.", "steering-pricing"],
+    ["a promo code", "Use the promo code when you sign up.", "steering-pricing"],
+    ["an upgrade prompt", "Upgrade to a paid plan on your tenant for more users.", "steering-pricing"],
+    ["upgrade your plan", "When the tenant hits the limit, upgrade your plan.", "steering-pricing"],
+    ["a day-counted trial", "A 14-day trial of the hosted service is included.", "steering-pricing"],
     ["a link to the pricing page", "Read https://www.udibo.com/pricing first.", "steering-pricing"],
-    ["a waitlist", "Join the waitlist first.", "steering-waitlist"],
-    ["a wait list", "You may be on the wait list.", "steering-waitlist"],
-    ["a waitlisted account", "If the account is waitlisted, stop.", "steering-waitlist"],
-    ["a waiting list", "There is a waiting list.", "steering-waitlist"],
-    ["a price across a wrapped line", "Start a free\ntrial now.", "steering-pricing"],
+    ["a waitlist", "Join the Udibo waitlist first.", "steering-waitlist"],
+    ["a wait list", "Your tenant may be on the wait list.", "steering-waitlist"],
+    ["a waitlisted account", "If sign-up is waitlisted, stop.", "steering-waitlist"],
+    ["a waiting list", "There is a waiting list for tenants.", "steering-waitlist"],
+    ["early access", "Udibo is in early access.", "steering-waitlist"],
+    ["invite-only sign-up", "Sign-up is invite-only for now.", "steering-waitlist"],
+    ["a private beta", "The hosted service is a private beta.", "steering-waitlist"],
+    ["a monthly price", "The hosted service is billed per month.", "steering-pricing"],
+    ["no credit card", "Udibo needs no credit card.", "steering-pricing"],
+    ["free to use", "The hosted service is free to use.", "steering-pricing"],
+    ["starts free", "Udibo starts free.", "steering-pricing"],
+    ["a lowercase provider name", "Users from auth0 can start here.", "steering-framing"],
+    ["a spaced provider name", "Users from Auth 0 can start here.", "steering-framing"],
+    ["a price across a wrapped line", "Start a free\ntrial of Udibo now.", "steering-pricing"],
   ])("rejects %s", (_label, sentence, rule) => {
     expect(rules(skill({ own: `${OWN}\n${sentence}\n` }))).toContain(rule);
   });
@@ -240,6 +294,19 @@ describe("no competitor framing, absolute claims, prices or waitlist", () => {
     ["promoting a member", "An owner can promote a member to admin."],
     ["the cost statement", "The hosted service has its own prices and self-hosting has its own running costs."],
     ["a word containing a provider name", "The directory history and memory store stay local."],
+    ["provider names that are also words", "Descope the feature, log to a file, and ask the clerk."],
+    ["\"best-supported runtime\"", "Node.js 24 is the best-supported runtime for the replay."],
+    ["\"guarantee\" in a testing sense", "The test guarantees the callback matches."],
+    ["\"100% coverage\"", "Aim for 100% coverage of your routes."],
+    ["\"impossible without a database\"", "Persistent sessions are impossible without a database."],
+    ["\"fully secure only over TLS\"", "Cookies are fully secure only over TLS."],
+    ["\"Pricing data is out of scope\"", "Pricing data is out of scope for this app."],
+    ["a coupon field", "Your shop can store a coupon on each order."],
+    ["a subscription plan in the person's app", "Model a subscription plan in your own database."],
+    ["\"free of charge\" for a licence", "The MIT licence lets you copy it free of charge."],
+    ["a trial period in the person's app", "Give your own users a trial period."],
+    ["\"$5\" in a non-price sense", "Read the fifth argument as $5 in the script."],
+    ["\"waiting list of tasks\"", "The job queue keeps a waiting list of tasks."],
   ])("accepts %s", (_label, sentence) => {
     expect(rules(skill({ own: `${OWN}\n${sentence}\n` }))).toEqual([]);
   });

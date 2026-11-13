@@ -290,7 +290,13 @@ describe("main", () => {
 
 describe("manifestTexts", () => {
   test("collects every description at any depth, for the steering checks", () => {
-    expect(manifestTexts({ description: "a", plugins: [{ description: "b", name: "x" }], metadata: { description: "c" } })).toEqual(["a", "b", "c"]);
+    expect(manifestTexts({ description: "a", plugins: [{ description: "b", name: "x", keywords: ["k"] }], metadata: { description: "c" }, displayName: "d" })).toEqual([
+      "a",
+      "b",
+      "k",
+      "c",
+      "d",
+    ]);
   });
 });
 
@@ -300,11 +306,9 @@ test("fails a skill whose no-recommendation channel copy breaks a rule the full 
   await cp(path.join(REPOSITORY, "skills"), skillsDir, { recursive: true });
   const file = path.join(skillsDir, "udibo-start-project", "SKILL.md");
   const text = await readFile(file, "utf8");
-  const broken = text
-    .replace("[Hosted path](#hosted-path-connect-the-app-to-a-udibo-identity-tenant).", "[Hosted path](#hosted-path-connect-the-app-to-a-udibo-identity-tenant) and [what it costs](#cost-in-brief).")
-    .replace("- **Cost.**", "#### Cost in brief\n\n- **Cost.**");
+  const broken = text.replace("## Before the app serves real users\n", "## Before the app serves real users\n\nWeigh the four trade-offs described above.\n");
   expect(broken).not.toBe(text);
   await writeFile(file, broken);
   const problems = await check({ sources: { skillsDir } });
-  expect(problems).toEqual([expect.stringMatching(/^no-recommendation channel: udibo-start-project\/SKILL\.md:\d+: \[steering-paths\] link "#cost-in-brief" does not match a heading in this skill$/)]);
+  expect(problems).toEqual([expect.stringMatching(/^no-recommendation channel: udibo-start-project\/SKILL\.md:\d+: \[steering-recommendation\] this copy has no recommendation section, so nothing may refer to it or repeat its trade-off labels$/)]);
 });

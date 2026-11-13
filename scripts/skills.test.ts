@@ -1,4 +1,4 @@
-import { cp, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { describe, expect, test } from "vitest";
@@ -136,16 +136,28 @@ describe.each(NAMES)("%s", (name) => {
     });
 
     test.each([
-      ["\"best\"", "This is the best way to start.", "steering-absolute-claim"],
+      ["\"best\"", "Udibo Identity is the best way to start.", "steering-absolute-claim", "steering-recommendation"],
       ["a price", "The hosted service costs $25 a month.", "steering-pricing"],
-      ["an upgrade prompt", "Upgrade to a paid plan when you need more users.", "steering-pricing"],
+      ["an upgrade prompt", "Upgrade to a paid plan on your tenant when you need more users.", "steering-pricing"],
       ["\"waitlist\"", "If sign-up is closed, join the waitlist.", "steering-waitlist"],
       ["competitor framing", "It gives you Acme-style sign-in pages.", "steering-framing"],
       ["a provider name", "People moving from Auth0 can start here too.", "steering-framing"],
       ["recommendation words in a later step", "We suggest the hosted path here as well.", "steering-recommendation"],
-    ])("is rejected once %s is added", async (_label, sentence, rule) => {
+    ])("is rejected once %s is added", async (_label, sentence, ...rules) => {
       await using copy = await mutated(name, (text) => `${text}\n${sentence}\n`);
-      expect(await rulesHit(copy.dir)).toEqual([rule]);
+      expect(await rulesHit(copy.dir)).toEqual(rules);
+    });
+
+    test.each(["full", "no-recommendation"] as const)("is rejected in the %s channel once a sibling section steers towards hosting", async (channel) => {
+      await using copy = await mutated(name, (text) => `${text}\n### Why Udibo likes hosted\n\nMost teams should use it.\n`);
+      expect(await rulesHit(copy.dir, channel)).toContain("steering-recommendation");
+    });
+
+    test.each(["full", "no-recommendation"] as const)("is rejected in the %s channel once a reference file carries a recommendation", async (channel) => {
+      await using copy = await mutated(name, (text) => `${text}\nMore in [why](references/why.md).\n`);
+      await mkdir(path.join(copy.dir, "references"));
+      await writeFile(path.join(copy.dir, "references", "why.md"), "# Why\n\n## Udibo's recommendation\n\nUdibo recommends hosted.\n");
+      expect(await rulesHit(copy.dir, channel)).toContain("steering-recommendation");
     });
 
     test("is rejected once its description says to prefer it", async () => {

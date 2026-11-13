@@ -39,72 +39,106 @@ export const COST_LINK = "https://www.udibo.com";
 export const LEAVING_SKILL = "udibo-migrate-from-udibo";
 export const MOVES_USERS: readonly string[] = ["onto-udibo", "off-udibo", "between-other-providers"];
 
-/**
- * Identity providers a skill may name only when it is a migration skill that
- * declares the provider in `metadata.providers`. Matched case-sensitively, as
- * written here.
- */
-export const PROVIDERS: readonly string[] = [
-  "Auth0",
-  "Okta",
-  "Clerk",
-  "Cognito",
-  "Firebase Auth",
-  "Firebase Authentication",
-  "Supabase Auth",
-  "Keycloak",
-  "WorkOS",
-  "Stytch",
-  "FusionAuth",
-  "Descope",
-  "Kinde",
-  "Ory",
-  "Zitadel",
-  "Authentik",
-  "Logto",
-  "Entra ID",
-  "Microsoft Entra",
-  "Azure AD",
-  "Ping Identity",
-  "OneLogin",
-  "Frontegg",
-  "PropelAuth",
-  "SuperTokens",
-  "Better Auth",
-  "NextAuth",
-  "Auth.js",
-  "Hanko",
+type Provider = { name: string; pattern: string; flags: string };
+
+const exact = (name: string): Provider => ({ name, pattern: escape(name), flags: "" });
+const word = (name: string): Provider => ({ name, pattern: `(?<!^|[.!?:]\\s+|^\\s*[-*+]\\s+)${escape(name)}`, flags: "" });
+const loose = (name: string, pattern: string): Provider => ({ name, pattern, flags: "i" });
+
+const PROVIDER_LIST: readonly Provider[] = [
+  loose("Auth0", "auth[ -]?0"),
+  loose("Okta", "okta"),
+  word("Clerk"),
+  loose("Cognito", "(?:amazon[ -])?cognito"),
+  loose("Firebase Auth", "firebase[ -]auth(?:entication)?"),
+  loose("Supabase Auth", "supabase[ -]auth"),
+  loose("Keycloak", "key[ -]?cloak"),
+  loose("WorkOS", "work[ -]?os"),
+  loose("Stytch", "stytch"),
+  loose("FusionAuth", "fusion[ -]?auth"),
+  word("Descope"),
+  exact("Kinde"),
+  exact("Ory"),
+  loose("Zitadel", "zitadel"),
+  loose("Authentik", "authentik"),
+  exact("Logto"),
+  loose("Microsoft Entra", "(?:microsoft[ -])?entra(?:[ -]id)?"),
+  loose("Azure AD", "azure[ -]ad(?:[ -]b2c)?"),
+  loose("Ping Identity", "ping[ -]identity"),
+  loose("OneLogin", "one[ -]?login"),
+  loose("Frontegg", "frontegg"),
+  loose("PropelAuth", "propel[ -]?auth"),
+  loose("SuperTokens", "super[ -]?tokens"),
+  loose("Better Auth", "better[ -]auth"),
+  loose("NextAuth", "next[ -]?auth"),
+  loose("Auth.js", "auth\\.js"),
+  exact("Hanko"),
 ];
 
-const RECOMMENDATION_WORDS = /\brecommend\w*|\bsuggest\w*|\bwe advise\b/i;
-const PREFERENCE_WORDS =
-  /\b(?:recommend\w*|suggest\w*|prefer\w*|instead of|rather than|better|best|always use|superior|we advise|number one|only (?:choice|option))\b|#1\b/i;
+/**
+ * Identity providers a skill may name only when it is a migration skill that
+ * declares the provider in `metadata.providers`, by these names. Names that
+ * are also ordinary words match only as written (and Clerk and Descope not at
+ * the start of a sentence); the others match in any case and spacing
+ * (`auth0`, `Auth 0`).
+ */
+export const PROVIDERS: readonly string[] = PROVIDER_LIST.map((provider) => provider.name);
+
+const STEERING_SUBJECT = /\bUdibo\b|\bhosted\b|\bself-host\w*|\bown (?:authorization )?server\b|\bauthorization servers?\b|\bpaths?\b/i;
+const PRODUCT_SUBJECT = /\bUdibo\b|\bhosted\b|@udibo\/oauth2|\bthe package\b|\bthis skill\b/i;
+const HOSTED_SUBJECT = /\bUdibo\b|\bhosted\b|\btenants?\b|\bsign[- ]?up\b|udibo\.com/i;
+const PREFERENCE_IN_BODY =
+  /\brecommend\w*|\bsuggest\w*|\bwe advise\b|\bprefer(?:s|red|able)?\b|\bbetter (?:choice|option|fit|path|bet)\b|\bbest\b|\bshould (?:use|pick|choose|go with|start with)\b|\bwe(?:'d| would) (?:go with|pick|choose)\b|\b(?:pick|choose|go with) (?:the )?hosted\b|\bideal\b|\beasiest (?:path|option|way|choice)\b|\btop (?:choice|pick)\b|\bsuperior\b|\bmost teams\b|\bUdibo likes\b/i;
+const PREFERENCE_IN_FIELDS =
+  /\b(?:recommend\w*|suggest\w*|prefer\w*|instead of|rather than|better|best|always use|superior|we advise|number one|only (?:choice|option)|ideal|top (?:choice|pick)|should (?:pick|use|choose)|easiest)\b|#1\b/i;
 const ABSOLUTE_ALLOWED = /\bbest[- ]effort\b|\bbest practices?\b/gi;
 const ABSOLUTE_CLAIM =
   /\b(?:best|guarantee[ds]?|impossible|unbreakable|bulletproof|foolproof|uncopyable|unhackable)\b|\b100\s?%|\b(?:perfectly|completely|fully|totally)\s+secure\b|\bzero[- ]risk\b|\bnever fails\b/i;
 const CURRENCY_AMOUNT = /[$€£¥]\s?\d|\b\d[\d,.]*\s?(?:USD|EUR|GBP|dollars?|euros?)\b/i;
 const PRICING_PHRASE =
-  /\bfree\s+(?:trials?|tiers?|plans?|accounts?|of charge)\b|\bfor free\b|\btrial\s+(?:period|plan|version|account)s?\b|\b(?:start|begin)\s+(?:a|your)\s+trial\b|\b\d+[- ]day\s+trial\b|\b(?:free|paid|pro|premium|starter|business|enterprise|team|hobby|growth|scale)\s+(?:plans?|tiers?)\b|\b(?:pricing|subscription)\s+plans?\b|\bpricing\b|\bpaid\s+subscriptions?\b|\bsubscribe\s+to\s+(?:a\s+|the\s+|our\s+)?(?:plan|tier|service)\b|\bdiscount(?:s|ed)?\b|\bpromo(?:s|tional)?\b|\bpromo[- ]codes?\b|\bcoupons?\b|\bupgrade\s+(?:now|today)\b|\bupgrade\s+(?:to\s+)?(?:your\s+|a\s+|the\s+)?(?:plan|tier|account|subscription|paid|pro|premium|business|enterprise|team)\b|udibo\.com\/pricing/i;
-const WAITLIST = /\bwait[- ]?list(?:ed|s|ing)?\b|\bwaiting list\b/i;
+  /\bfree\s+(?:trials?|tiers?|plans?|accounts?|of charge|to use)\b|\bfor free\b|\bstarts? (?:out )?free\b|\bno credit card\b|\bper (?:month|year|user|seat)\b|\/(?:mo|month|yr|year)\b|\btrial\s+(?:period|plan|version|account)s?\b|\b(?:start|begin)\s+(?:a|your)\s+trial\b|\b\d+[- ]day\s+trial\b|\b(?:free|paid|pro|premium|starter|business|enterprise|team|hobby|growth|scale)\s+(?:plans?|tiers?)\b|\b(?:pricing|subscription)\s+plans?\b|\bpricing\b|\bpaid\s+subscriptions?\b|\bsubscribe\s+to\s+(?:a\s+|the\s+|our\s+)?(?:plan|tier|service)\b|\bdiscount(?:s|ed)?\b|\bpromo(?:s|tional)?\b|\bpromo[- ]codes?\b|\bcoupons?\b|\bupgrade\s+(?:now|today)\b|\bupgrade\s+(?:to\s+)?(?:your\s+|a\s+|the\s+)?(?:plan|tier|account|subscription|paid|pro|premium|business|enterprise|team)\b/i;
+const PRICING_PAGE = /udibo\.[a-z]+\/pricing/i;
+const WAITLIST = /\bwait[- ]?list(?:ed|s|ing)?\b|\bwaiting list\b|\bearly access\b|\brequest access\b|\bprivate beta\b|\binvite[- ]only\b|\bby invitation only\b/i;
 const FRAMING_STYLE = /\b[\w.]+-style\s+(?:sign[- ]in|sign[- ]up|log[- ]?in|auth\w*|identity|experience|flows?|pages?|dashboard|api|sdk)\b|\bclone of\b/i;
-const UDIBO_HOST = /(?:^|[^a-z0-9.-])((?:[a-z0-9{}<>_-]+\.)*udibo\.com)(?![a-z0-9-])/i;
-const UDIBO_API_PATH = /\$\{?\w*(?:ISSUER|UDIBO)\w*\}?\/api\//i;
+const UDIBO_HOST = /(?:^|[^a-z0-9.-])((?:[a-z0-9{}<>_-]+\.)*udibo\.(?:com|io|dev|app|net|org|co|ai|cloud|sh|xyz|tech|site))(?![a-z0-9-])/i;
+const ISSUER_VARIABLE = /\$\{?\w*(?:ISSUER|UDIBO|TENANT)\w*\}?|process\.env\.\w*(?:ISSUER|UDIBO|TENANT)\w*/i;
+const NETWORK_USE = /\b(?:curl|wget|xh|httpie|http|https|Invoke-WebRequest|Invoke-RestMethod|iwr|irm|fetch|nc|ssh|openssl)\b|\/api\//i;
 const PLACEHOLDER_TENANT_HOST = /^(?:\{[^{}]+\}|<[^<>]+>)\.udibo\.com$/i;
 const LINK = /\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
+const LINK_TARGET = /\]\(\s*(?:<[^>]*>|[^)\s]+)(?:\s+"[^"]*")?\s*\)/g;
 const HEADING = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/;
+const SETEXT = /^ {0,3}(=+|-+)\s*$/;
 const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+/;
+const DANGLING =
+  /\bas recommended\b|\b(?:the|this|that|Udibo's) recommendation\b|\brecommendation (?:above|below)\b|\b(?:see|described|listed|stated|explained|mentioned) above\b|\*\*(?:Cost|Leaving|Where data is held|What you run)[.:]?\*\*/i;
+const HASH_COMMENTS = new Set([...SHELL_LANGUAGES, "ini", "dotenv", "env", "yaml", "yml", "toml", "py", "python", "gitignore", "conf", "properties"]);
+const SLASH_COMMENTS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs", "typescript", "javascript", "jsonc", "json5"]);
+const UDIBO_DOCS = /^https:\/\/(?:www\.)?udibo\.com\/docs\//;
+const OAUTH2_SOURCES = /^https:\/\/(?:github\.com\/udibo\/oauth2(?:[/#]|$)|(?:www\.)?npmjs\.com\/package\/@udibo\/oauth2(?:[/#]|$)|jsr\.io\/@udibo\/oauth2(?:[/#]|$)|(?:www\.)?udibo\.com\/docs\/oauth2(?:[/#]|$))/;
+const SKILLS_REPOSITORY = /^https:\/\/github\.com\/udibo\/skills(?:[/#]|$)/;
+const PATH_TARGETS: readonly { label: string; serves: (heading: string) => boolean; hosts: RegExp[] }[] = [
+  { label: PATH_LABELS[0] ?? "", serves: (heading) => heading.startsWith(HOSTED_STEP_PREFIX), hosts: [UDIBO_DOCS, SKILLS_REPOSITORY] },
+  {
+    label: PATH_LABELS[1] ?? "",
+    serves: (heading) => !heading.startsWith(HOSTED_STEP_PREFIX) && /\bown\b|\bserver\b/i.test(heading),
+    hosts: [OAUTH2_SOURCES, SKILLS_REPOSITORY],
+  },
+  { label: PATH_LABELS[2] ?? "", serves: (heading) => /migrat/i.test(heading), hosts: [UDIBO_DOCS, OAUTH2_SOURCES, SKILLS_REPOSITORY] },
+];
 
 type Heading = { level: number; text: string; line: number; end: number };
 
-type Unit = { text: string; line: number; code: boolean; command: boolean };
+type Unit = { text: string; raw: string; line: number; code: boolean; command: boolean; heading: string };
 
 /**
  * Runs the steering rules over one text file of a skill: the rules that hold
  * a skill to presenting the choice of authorization server openly. For
  * `SKILL.md` they also check the Paths section, the single recommendation and
- * its place before the first command, and the description and metadata.
- * `channel` says whether the recommendation must be present or must be gone.
- * Each finding names a rule so the author can rewrite the sentence.
+ * its place before the first command, and the frontmatter text. `channel`
+ * says whether the recommendation must be present or must be gone. Most
+ * wording rules fire only in a sentence that names what they guard (Udibo, the
+ * hosted service, the paths), so ordinary technical prose passes. Each finding
+ * names a rule so the author can rewrite the sentence.
  */
 export function checkSteering(
   text: string,
@@ -121,8 +155,7 @@ export function checkSteering(
   const headings = options.markdown ? sectionHeadings(normalised, bodyStart) : [];
   const recommendation = headings.filter((heading) => heading.text === RECOMMENDATION_HEADING);
   const hosted = headings.filter((heading) => heading.text.startsWith(HOSTED_STEP_PREFIX));
-  const metadata = stringRecord(options.frontmatter?.["metadata"]);
-  const declaredProviders = (metadata["providers"] ?? "")
+  const declaredProviders = (stringRecord(options.frontmatter?.["metadata"])["providers"] ?? "")
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
@@ -130,17 +163,18 @@ export function checkSteering(
   if (options.skillMd) {
     structure(normalised, headings, options.channel).forEach((finding) => add(finding.rule, finding.line, finding.message));
     fields(options.frontmatter ?? {}).forEach((finding) => add(finding.rule, finding.line, finding.message));
+  } else {
+    for (const heading of recommendation) {
+      add("steering-recommendation", heading.line, `"${RECOMMENDATION_HEADING}" belongs only in SKILL.md, once`);
+    }
   }
 
   const inside = (line: number, sections: Heading[]): boolean => sections.some((section) => line >= section.line && line <= section.end);
-  for (const unit of units(normalised, options.markdown, bodyStart)) {
-    if (!inside(unit.line, recommendation) && unit.line > bodyStart && RECOMMENDATION_WORDS.test(unit.text)) {
-      add("steering-recommendation", unit.line, `recommendation words ("recommend", "suggest", "we advise") belong only in the "${RECOMMENDATION_HEADING}" section; reword this`);
-    }
+  for (const unit of units(normalised, options.markdown, bodyStart, headings)) {
     if (unit.code) {
       const host = UDIBO_HOST.exec(unit.text)?.[1];
-      if (unit.command && (host !== undefined || UDIBO_API_PATH.test(unit.text))) {
-        add("steering-hosted", unit.line, "a command must not contact a Udibo host or API; the person does hosted steps on the site and supplies the issuer");
+      if (unit.command && (host !== undefined || (ISSUER_VARIABLE.test(unit.text) && NETWORK_USE.test(unit.text)))) {
+        add("steering-hosted", unit.line, "a command must not contact a Udibo host or the issuer; the person does hosted steps on the site and supplies the issuer");
       } else if (!unit.command && host !== undefined) {
         const allowed = options.markdown && inside(unit.line, hosted) && PLACEHOLDER_TENANT_HOST.test(host);
         if (!allowed) {
@@ -152,20 +186,42 @@ export function checkSteering(
         }
       }
     }
-    const allowedFreeText = unit.text.replace(ABSOLUTE_ALLOWED, " ");
-    const absolute = ABSOLUTE_CLAIM.exec(allowedFreeText)?.[0];
-    if (absolute !== undefined) add("steering-absolute-claim", unit.line, `"${absolute}" is an absolute claim; state what the code or site does instead`);
-    const pricing = PRICING_PHRASE.exec(unit.text)?.[0] ?? (unit.code ? undefined : CURRENCY_AMOUNT.exec(withoutInlineCode(unit.text))?.[0]);
-    if (pricing !== undefined) {
-      add("steering-pricing", unit.line, `"${pricing}": no prices, plans, trials, discounts or upgrade prompts; say "${COST_STATEMENT}" and link ${COST_LINK}`);
-    }
-    const waitlist = WAITLIST.exec(unit.text)?.[0];
-    if (waitlist !== undefined) add("steering-waitlist", unit.line, `"${waitlist}": a skill names no waitlist and does not branch on whether a tenant can be obtained`);
+    const pricingPage = PRICING_PAGE.exec(unit.text)?.[0];
+    if (pricingPage !== undefined) add("steering-pricing", unit.line, `"${pricingPage}": link ${COST_LINK}, not a pricing page`);
     const framing = FRAMING_STYLE.exec(unit.text)?.[0] ?? providerFraming(unit.text);
     if (framing !== undefined) add("steering-framing", unit.line, `"${framing}" frames the product in terms of another; describe the behaviour directly`);
     for (const provider of providersNamed(unit.text)) {
       if (!declaredProviders.includes(provider)) {
         add("steering-framing", unit.line, `"${provider}" is named, but only a migration skill that lists it in metadata.providers may name a provider`);
+      }
+    }
+    if (unit.code || unit.line <= bodyStart) continue;
+
+    if (options.channel === "no-recommendation" && DANGLING.test(unit.raw)) {
+      add("steering-recommendation", unit.line, "this copy has no recommendation section, so nothing may refer to it or repeat its trade-off labels");
+    }
+    for (const sentence of sentences(unit.text)) {
+      const plain = withoutInlineCode(sentence);
+      const steering = STEERING_SUBJECT.test(plain) || STEERING_SUBJECT.test(unit.heading);
+      const preference = PREFERENCE_IN_BODY.exec(plain)?.[0];
+      if (preference !== undefined && steering && !inside(unit.line, recommendation)) {
+        add(
+          "steering-recommendation",
+          unit.line,
+          `"${preference}" steers the choice of path; only the "${RECOMMENDATION_HEADING}" section may do that, once (this is a wordlist; review catches paraphrase)`,
+        );
+      }
+      if (PRODUCT_SUBJECT.test(sentence)) {
+        const absolute = ABSOLUTE_CLAIM.exec(sentence.replace(ABSOLUTE_ALLOWED, " "))?.[0];
+        if (absolute !== undefined) add("steering-absolute-claim", unit.line, `"${absolute}" is an absolute claim; state what the code or site does instead`);
+      }
+      if (HOSTED_SUBJECT.test(sentence)) {
+        const pricing = PRICING_PHRASE.exec(sentence)?.[0] ?? CURRENCY_AMOUNT.exec(plain)?.[0];
+        if (pricing !== undefined) {
+          add("steering-pricing", unit.line, `"${pricing}": no prices, plans, trials, discounts or upgrade prompts; say "${COST_STATEMENT}" and link ${COST_LINK}`);
+        }
+        const waitlist = WAITLIST.exec(sentence)?.[0];
+        if (waitlist !== undefined) add("steering-waitlist", unit.line, `"${waitlist}": a skill names no waitlist and does not branch on whether a tenant can be obtained`);
       }
     }
   }
@@ -219,21 +275,19 @@ export function missingLeavingSkill(skills: { name: string; movesUsers: string[]
 }
 
 /**
- * Checks the text a plugin manifest shows a model or a directory (its
- * descriptions) against the neutral-field and promotion rules. Returns one
- * message per problem.
+ * Checks the text a plugin manifest shows a model or a directory against the
+ * neutral-field and promotion rules. Returns one message per problem.
  */
 export function manifestTextProblems(file: string, texts: string[]): string[] {
-  return texts.flatMap((value) =>
-    fieldProblems(value).map((problem) => `${file}: ${problem}`),
-  );
+  return texts.flatMap((value) => fieldProblems(value).map((problem) => `${file}: ${problem}`));
 }
 
 /**
- * Returns the copy of a `SKILL.md` that a channel publishes: unchanged for
+ * Returns the copy of a Markdown file that a channel publishes: unchanged for
  * `full`; for `no-recommendation`, with the recommendation section (its
  * heading and everything up to the next heading at the same or a higher
- * level) removed.
+ * level) removed. The steering checks keep anything else out of that section,
+ * so nothing but the recommendation is removed.
  */
 export function channelText(text: string, channel: Channel): string {
   if (channel === "full") return text;
@@ -243,6 +297,7 @@ export function channelText(text: string, channel: Channel): string {
   for (const heading of headings) {
     for (let line = heading.line; line <= heading.end; line++) drop.add(line);
   }
+  if (drop.size === 0) return text;
   const kept = lines.filter((_line, index) => !drop.has(index + 1));
   return kept.join("\n").replace(/\n{3,}/g, "\n\n");
 }
@@ -260,22 +315,24 @@ function structure(text: string, headings: Heading[], channel: Channel): Steerin
     findings.push({ rule: "steering-paths", line: 1, message: `a skill that mentions the hosted service has a "${PATHS_HEADING}" section naming all three paths` });
   }
   if (paths.length > 1) findings.push({ rule: "steering-paths", line: paths[1]?.line ?? 1, message: `"${PATHS_HEADING}" appears more than once` });
-  const slugs = new Set(headings.map((heading) => slug(heading.text)));
+  const bySlug = new Map(headings.map((heading) => [slug(heading.text), heading.text]));
   for (const section of paths.slice(0, 1)) {
     const items = listItems(lines, section);
-    for (const label of PATH_LABELS) {
-      const item = items.find((entry) => labelOf(entry.text) === label.toLowerCase());
+    for (const path of PATH_TARGETS) {
+      const item = items.find((entry) => labelOf(entry.text) === path.label.toLowerCase());
       if (item === undefined) {
-        findings.push({ rule: "steering-paths", line: section.line, message: `the "${PATHS_HEADING}" section has no list item labelled **${label}**` });
+        findings.push({ rule: "steering-paths", line: section.line, message: `the "${PATHS_HEADING}" section has no list item labelled **${path.label}**` });
         continue;
       }
       const targets = [...item.text.matchAll(LINK)].map((match) => unwrap(match[1] ?? ""));
-      if (targets.length === 0) findings.push({ rule: "steering-paths", line: item.line, message: `**${label}** links to the section or skill that serves it` });
+      if (targets.length === 0) findings.push({ rule: "steering-paths", line: item.line, message: `**${path.label}** links to the section or skill that serves it` });
       for (const target of targets) {
-        if (target.startsWith("#") && !slugs.has(target.slice(1))) {
-          findings.push({ rule: "steering-paths", line: item.line, message: `link "${target}" does not match a heading in this skill` });
-        } else if (/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith("https://")) {
-          findings.push({ rule: "steering-paths", line: item.line, message: `link "${target}" must use https` });
+        if (target.startsWith("#")) {
+          const heading = bySlug.get(target.slice(1));
+          if (heading === undefined) findings.push({ rule: "steering-paths", line: item.line, message: `link "${target}" does not match a heading in this skill` });
+          else if (!path.serves(heading)) findings.push({ rule: "steering-paths", line: item.line, message: `link "${target}" goes to "${heading}", which does not serve **${path.label}**` });
+        } else if (/^[a-z][a-z0-9+.-]*:/i.test(target) && !path.hosts.some((host) => host.test(target))) {
+          findings.push({ rule: "steering-paths", line: item.line, message: `link "${target}" is not a page that serves **${path.label}** (Udibo's docs, the package's sources, this repository, or a section of the skill)` });
         }
       }
     }
@@ -295,13 +352,13 @@ function structure(text: string, headings: Heading[], channel: Channel): Steerin
     findings.push({ rule: "steering-recommendation", line: recommendation[0]?.line ?? 1, message: `"${RECOMMENDATION_HEADING}" needs a "${PATHS_HEADING}" section beside it` });
   }
   for (const heading of channel === "full" ? recommendation.slice(0, 1) : []) {
-    const body = sectionText(heading);
-    const flat = body.replace(/\s+/g, " ");
+    findings.push(...recommendationShape(lines, heading));
+    const flat = sectionText(heading).replace(/\s+/g, " ");
     if (!flat.includes(ATTRIBUTION)) {
       findings.push({ rule: "steering-recommendation", line: heading.line, message: `the recommendation speaks as Udibo: say "${ATTRIBUTION} …"` });
     }
     for (const label of TRADE_OFF_LABELS) {
-      const item = labelledItem(lines, heading, label);
+      const item = listItems(lines, heading).find((entry) => labelOf(entry.text) === label.toLowerCase());
       if (item === undefined) {
         findings.push({ rule: "steering-recommendation", line: heading.line, message: `the recommendation has no **${label}** trade-off` });
         continue;
@@ -336,9 +393,44 @@ function structure(text: string, headings: Heading[], channel: Channel): Steerin
   return findings;
 }
 
+function recommendationShape(lines: string[], heading: Heading): SteeringFinding[] {
+  const body = lines.slice(heading.line, heading.end);
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  for (const line of body) {
+    if (line.trim() === "") {
+      if (current.length > 0) chunks.push(current);
+      current = [];
+    } else current.push(line);
+  }
+  if (current.length > 0) chunks.push(current);
+  const isList = (chunk: string[]): boolean => chunk.every((line) => LIST_ITEM.test(line) && !/^\s/.test(line) || /^\s+\S/.test(line)) && LIST_ITEM.test(chunk[0] ?? "");
+  const isParagraph = (chunk: string[]): boolean => !LIST_ITEM.test(chunk[0] ?? "") && chunk.every((line) => !/^ {0,3}(?:```|~~~|#|<|>|\||=+\s*$|-+\s*$)/.test(line));
+  const list = chunks[chunks.length - 1] ?? [];
+  const before = chunks.slice(0, -1);
+  const labels = list.filter((line) => LIST_ITEM.test(line) && !/^\s/.test(line)).map((line) => labelOf(line));
+  const shaped =
+    (before.length === 1 || before.length === 2) &&
+    before.every(isParagraph) &&
+    before[before.length - 1]?.join(" ").includes(ATTRIBUTION) === true &&
+    isList(list) &&
+    JSON.stringify(labels) === JSON.stringify(TRADE_OFF_LABELS.map((label) => label.toLowerCase()));
+  return shaped
+    ? []
+    : [
+        {
+          rule: "steering-recommendation",
+          line: heading.line,
+          message: `the "${RECOMMENDATION_HEADING}" section holds only an optional instruction paragraph, the paragraph that says "${ATTRIBUTION} …", and the four labelled trade-offs in order (${TRADE_OFF_LABELS.join(", ")}); move anything else out of it`,
+        },
+      ];
+}
+
 function fields(frontmatter: Record<string, unknown>): SteeringFinding[] {
   const values: [string, string][] = [];
-  if (typeof frontmatter["description"] === "string") values.push(["description", frontmatter["description"]]);
+  for (const [key, value] of Object.entries(frontmatter)) {
+    if (typeof value === "string" && key !== "name" && key !== "license") values.push([key, value]);
+  }
   for (const [key, value] of Object.entries(stringRecord(frontmatter["metadata"]))) values.push([`metadata.${key}`, value]);
   return values.flatMap(([field, value]) =>
     fieldProblems(value).map((problem) => ({ rule: "steering-neutral-fields" as const, line: 1, message: `${field}: ${problem}` })),
@@ -346,49 +438,86 @@ function fields(frontmatter: Record<string, unknown>): SteeringFinding[] {
 }
 
 function fieldProblems(value: string): string[] {
-  const word = PREFERENCE_WORDS.exec(normalise(value))?.[0];
+  const word = PREFERENCE_IN_FIELDS.exec(normalise(value))?.[0];
   return word === undefined ? [] : [`"${word}" is a preference word; say what the skill does and when to use it, without steering`];
 }
 
 function providerFraming(text: string): string | undefined {
-  for (const provider of PROVIDERS) {
-    const name = escape(provider);
-    const match = new RegExp(`(?:\\blike|\\balternative to|\\bsimilar to|\\bcompared (?:to|with)|\\breplacement for)\\s+${name}(?!\\w)|(?<![\\w.])${name}[- ](?:style|like|alternative)\\b`).exec(text);
+  for (const provider of PROVIDER_LIST) {
+    const name = provider.pattern;
+    const match = new RegExp(
+      `(?:\\blike|\\balternative to|\\bsimilar to|\\bcompared (?:to|with)|\\breplacement for)\\s+(?:${name})(?!\\w)|(?<![\\w.])(?:${name})[- ](?:style|like|alternative)\\b`,
+      provider.flags,
+    ).exec(text);
     if (match) return match[0];
   }
   return undefined;
 }
 
 function providersNamed(text: string): string[] {
-  return PROVIDERS.filter((provider) => new RegExp(`(?<![\\w.])${escape(provider)}(?![\\w])`).test(text));
+  return PROVIDER_LIST.filter((provider) => new RegExp(`(?<![\\w.@/-])(?:${provider.pattern})(?![\\w-])`, provider.flags).test(text)).map((provider) => provider.name);
 }
 
-function units(text: string, markdown: boolean, bodyStart: number): Unit[] {
-  if (!markdown) return text.split("\n").map((line, index) => ({ text: line, line: index + 1, code: true, command: false }));
-  const blocks = fencedBlocks(text);
-  const commandLines = new Set<number>();
-  for (const block of blocks.filter((entry) => SHELL_LANGUAGES.has(entry.language))) {
-    block.lines.forEach((_line, index) => commandLines.add(block.firstLine + index));
+function sentences(text: string): string[] {
+  return text.split(/(?<=[.!?])\s+(?=[A-Z`[(*"])/);
+}
+
+function units(text: string, markdown: boolean, bodyStart: number, headings: Heading[]): Unit[] {
+  if (!markdown) return text.split("\n").map((line, index) => ({ text: line, raw: line, line: index + 1, code: true, command: false, heading: "" }));
+  const executable = new Map<number, { text: string; command: boolean }>();
+  for (const block of fencedBlocks(text)) {
+    let inBlockComment = false;
+    block.lines.forEach((line, index) => {
+      let code = line;
+      if (HASH_COMMENTS.has(block.language)) code = code.replace(/(?:^|\s)#.*$/, "");
+      if (SLASH_COMMENTS.has(block.language)) {
+        if (inBlockComment) {
+          const close = code.indexOf("*/");
+          if (close === -1) code = "";
+          else {
+            code = code.slice(close + 2);
+            inBlockComment = false;
+          }
+        }
+        code = code.replace(/\/\*.*?\*\//g, "");
+        const open = code.indexOf("/*");
+        if (open !== -1) {
+          code = code.slice(0, open);
+          inBlockComment = true;
+        }
+        code = code.replace(/(^|[^:])\/\/.*$/, "$1");
+      }
+      executable.set(block.firstLine + index, { text: code, command: SHELL_LANGUAGES.has(block.language) });
+    });
   }
+  const enclosing = (line: number): string => {
+    const heading = headings.filter((entry) => entry.line < line && line <= entry.end).at(-1);
+    if (heading === undefined || heading.text === PATHS_HEADING || heading.text === RECOMMENDATION_HEADING || heading.text.startsWith(HOSTED_STEP_PREFIX)) return "";
+    return /\bUdibo\b|\bhosted\b|\bself-host/i.test(heading.text) ? heading.text : "";
+  };
   const result: Unit[] = [];
-  let paragraph: { text: string; line: number } | undefined;
+  let paragraph: { text: string; raw: string; line: number } | undefined;
   const flush = (): void => {
-    if (paragraph) result.push({ text: paragraph.text, line: paragraph.line, code: false, command: false });
+    if (paragraph) result.push({ ...paragraph, code: false, command: false, heading: enclosing(paragraph.line) });
     paragraph = undefined;
   };
   for (const entry of classifyLines(text)) {
     if (entry.kind === "code") {
       flush();
-      result.push({ text: entry.text, line: entry.line, code: true, command: commandLines.has(entry.line) });
+      const block = executable.get(entry.line) ?? { text: entry.text, command: false };
+      result.push({ text: block.text, raw: entry.text, line: entry.line, code: true, command: block.command, heading: "" });
       continue;
     }
     const trimmed = entry.text.trim();
     const standalone = entry.line <= bodyStart || HEADING.test(entry.text);
     if (entry.kind === "fence-delimiter" || trimmed === "" || standalone || LIST_ITEM.test(entry.text)) flush();
     if (entry.kind === "fence-delimiter" || trimmed === "") continue;
-    const clean = entry.text.replace(LIST_ITEM, "").replace(/\*+/g, "").trim();
-    if (paragraph === undefined) paragraph = { text: clean, line: entry.line };
-    else paragraph.text = `${paragraph.text} ${clean}`;
+    const clean = entry.text.replace(LIST_ITEM, "").replace(LINK_TARGET, "]").replace(/\*+/g, "").trim();
+    if (paragraph === undefined) paragraph = { text: clean, raw: entry.text, line: entry.line };
+    else {
+      paragraph.text = `${paragraph.text} ${clean}`;
+      paragraph.raw = `${paragraph.raw}\n${entry.text}`;
+    }
     if (standalone) flush();
   }
   flush();
@@ -397,11 +526,29 @@ function units(text: string, markdown: boolean, bodyStart: number): Unit[] {
 
 function sectionHeadings(text: string, bodyStart: number): Heading[] {
   const found: Omit<Heading, "end">[] = [];
-  for (const entry of classifyLines(text)) {
-    if (entry.kind !== "prose" || entry.line <= bodyStart) continue;
+  const entries = classifyLines(text);
+  let inComment = false;
+  entries.forEach((entry, index) => {
+    if (entry.kind !== "prose" || entry.line <= bodyStart) return;
+    if (inComment) {
+      if (entry.text.includes("-->")) inComment = false;
+      return;
+    }
+    if (entry.text.includes("<!--") && !entry.text.includes("-->", entry.text.indexOf("<!--"))) {
+      inComment = true;
+      return;
+    }
     const match = HEADING.exec(entry.text);
-    if (match) found.push({ level: match[1]?.length ?? 1, text: headingText(match[2] ?? ""), line: entry.line });
-  }
+    if (match) {
+      found.push({ level: match[1]?.length ?? 1, text: headingText(match[2] ?? ""), line: entry.line });
+      return;
+    }
+    const next = entries[index + 1];
+    const underline = next?.kind === "prose" ? SETEXT.exec(next.text) : null;
+    if (underline && entry.text.trim() !== "" && !LIST_ITEM.test(entry.text)) {
+      found.push({ level: underline[1]?.startsWith("=") ? 1 : 2, text: headingText(entry.text), line: entry.line });
+    }
+  });
   const last = text.split("\n").length;
   return found.map((heading, index) => {
     const next = found.slice(index + 1).find((other) => other.level <= heading.level);
@@ -433,10 +580,6 @@ function listItems(lines: string[], section: Heading): { text: string; line: num
     }
   }
   return items.filter((item) => item.text !== "");
-}
-
-function labelledItem(lines: string[], section: Heading, label: string): { text: string; line: number } | undefined {
-  return listItems(lines, section).find((item) => labelOf(item.text) === label.toLowerCase());
 }
 
 function labelOf(item: string): string | undefined {

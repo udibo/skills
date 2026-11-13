@@ -270,25 +270,29 @@ The conventions a skill follows so the harness can check it exactly:
 
 | Rule | Enforced by |
 | ---- | ----------- |
-| A skill that mentions the hosted service (the words "Udibo Identity" or a `udibo.com` address) has one Paths section naming all three paths, each linking to what serves it | Harness: the section exists once, has the three labels, each has a link, and every `#anchor` matches a heading. Review: that each target really serves its path |
-| Exactly one recommendation, attributed to Udibo, beside the Paths section | Harness: the heading occurs once, says "Udibo recommends", and "recommend", "suggest" and "we advise" appear nowhere else in the skill |
+| A skill that mentions the hosted service (the words "Udibo Identity" or a `udibo.com` address) has one Paths section naming all three paths, each linking to what serves it | Harness: the section exists once and has the three labels. Each label has a link, and each link is either an anchor to a heading that serves that path (the `Hosted path:` step; a section about your own server; a section about migrating), a file in the skill, or a page on Udibo's docs, the package's sources or this repository, as fits the path. Review: that the target's content really serves the path |
+| Exactly one recommendation, attributed to Udibo, beside the Paths section, in `SKILL.md` only | Harness: the heading occurs once, only in `SKILL.md` (a reference file carrying it fails in every channel), and says "Udibo recommends". The section holds nothing but an optional instruction paragraph, that paragraph and the four labelled trade-offs in order: a code block, a further paragraph, a sub-heading or a setext heading inside it fails, and headings inside HTML comments do not end it |
 | Trade-offs both ways: cost, leaving, where data is held, what you run | Harness: the four labels are present, each names the hosted service and running your own, and Cost is the fixed sentence with its link. Review: that each statement is true and sourced |
-| The recommendation sits in the plan step, before any command, and is never raised again | Harness: the Paths and recommendation sections come before the first shell or file block, and no recommendation words appear elsewhere. Review: that the agent does not raise it again in conversation |
+| The recommendation sits in the plan step, before any command, and is never raised again | Harness: the Paths and recommendation sections come before the first shell or file block. Outside the recommendation, a prose sentence that names Udibo, the hosted service, self-hosting, an authorization server or a path, or sits under a heading naming Udibo or hosting, fails on a preference phrase ("recommend…", "suggest…", "prefer", "better choice", "best", "should use/pick/choose", "we'd go with", "pick hosted", "ideal", "easiest path", "top choice", "most teams", "Udibo likes" and the like). Code blocks are not checked for these. Review: paraphrase the wordlist misses, and that the agent does not raise it again in conversation |
 | The person's choice is followed; the skill changes path only when they ask | Review |
 | Equal help on every path | Harness: the replay covers every command on every path. Review: depth |
-| Nothing hosted happens implicitly | Harness: no shell command names a `udibo.com` host or calls an issuer's `/api/` path; no other code or file block names a `udibo.com` host, except a placeholder such as `{tenant-id}.udibo.com` inside the hosted step; the hosted step says the person approves it; there is at most one |
-| `description` and `metadata` stay neutral | Harness: "recommend", "suggest", "prefer", "instead of", "rather than", "better", "best", "always use", "superior" and the like fail in `description`, in every `metadata` value and in the plugin manifests' descriptions. Review: that no trigger is broader than the job |
-| No disparagement and no framing in terms of another provider | Harness: "‹word›-style sign-in" (and pages, flows, auth and the like), "clone of", and "like", "alternative to", "similar to", "compared to" or "replacement for" a listed provider fail; a listed provider's name fails outside a migration skill declaring it. Review: tone |
-| No absolute claims | Harness: "best", "guaranteed", "impossible", "100%", "unbreakable", "bulletproof", "foolproof", "fully secure" and the like fail ("best-effort" and "best practice" are allowed). Review: every claim against the code and site |
-| No prices, plans, trials, discounts or upgrade prompts, and no waitlist | Harness: a currency amount in prose, "free trial", "free tier", "‹name› plan", "pricing", "discount", "promo", "coupon", "upgrade to a paid plan" and the like, a link to a pricing page, and "waitlist" fail. "Upgrade" on its own, as in a password hash that upgrades on next sign-in, is allowed |
+| Nothing hosted happens implicitly | Harness: no shell command names a Udibo host (`udibo.com` or another Udibo domain such as `udibo.io`), or uses an issuer, tenant or Udibo variable (`$AUTH_ISSUER`, `${UDIBO_…}`) with a network tool or an `/api/` path. No other code or file block names a Udibo host, except a placeholder such as `{tenant-id}.udibo.com` inside the hosted step. The hosted step says the person approves it, and there is at most one. Comments in shell, INI, YAML and TypeScript or JavaScript blocks are not code, so a docs link in a comment passes. Review: a host assembled from pieces in code |
+| `description`, other frontmatter text and the manifests stay neutral | Harness: preference words ("recommend", "suggest", "prefer", "instead of", "rather than", "better", "best", "always use", "superior", "ideal", "top choice", "should pick/use", "easiest" and the like) fail in `description`, `compatibility` and every other free-text frontmatter field, every `metadata` value, and the plugin and marketplace manifests' descriptions, display names and keywords. Review: that no trigger is broader than the job |
+| No disparagement and no framing in terms of another provider | Harness: "‹word›-style sign-in" (and pages, flows, auth and the like), "clone of", and "like", "alternative to", "similar to", "compared to" or "replacement for" a listed provider fail. So does a listed provider's name outside a migration skill declaring it, matched in any case and spacing (`auth0`, `Auth 0`), except names that are also words (Clerk, Descope, Ory, Logto, Kinde, Hanko), which match only as written. Review: tone |
+| No absolute claims about Udibo or the package | Harness: in a sentence naming Udibo, the hosted service, the package or this skill, "best", "guaranteed", "impossible", "100%", "unbreakable", "bulletproof", "foolproof", "fully secure" and the like fail ("best-effort" and "best practice" are allowed). Review: every claim against the code and site |
+| No prices, plans, trials, discounts or upgrade prompts, and no waitlist | Harness: in a sentence naming Udibo, the hosted service, a tenant or sign-up, these fail: a currency amount, "free trial", "free tier", "free to use", "starts free", "no credit card", "per month", "‹name› plan", "pricing", "discount", "promo", "coupon", "upgrade to a paid plan" and the like, "waitlist", "early access", "request access", "private beta" and "invite-only". A link to a Udibo pricing page fails anywhere. "Upgrade" on its own, as in a password hash that upgrades on next sign-in, is allowed |
 | Leaving is supported as well as arriving | Harness: the build fails when a skill declaring `moves-users: onto-udibo` is published without `udibo-migrate-from-udibo`; `udibo-migrate-from-udibo` must declare `off-udibo`, and any other `udibo-migrate-from-…` skill must declare a direction |
 | The vendors' rules come first | Harness: the no-recommendation channel below. Review: the re-read of both policies before each tag and submission |
 
-These are pattern checks with the same limits as the safety rules: they keep
-the mechanical part of each rule from regressing and leave its judgement to
-review. A rule that flags a legitimate sentence is reworded rather than
-excused; `scripts/lib/steering.test.ts` lists the sentences each rule must
-accept, such as "present a plan" and "the plan step".
+These are wordlist and pattern checks with the same limits as the safety rules.
+They keep the mechanical part of each rule from regressing, and review remains
+the control for everything else. Most wording rules fire only in a sentence
+that names what they guard, so ordinary technical prose ("We suggest running
+the tests first", "100% coverage", "Pricing data is out of scope") passes. That
+also means a claim split across two sentences, a paraphrase the wordlist
+doesn't know, and a Udibo host built from pieces in code are left to review. A
+rule that flags a legitimate sentence is narrowed rather than excused:
+`scripts/lib/steering.test.ts` lists the sentences each rule must accept.
 
 #### Channel copies without the recommendation
 
@@ -303,8 +307,11 @@ node scripts/build.ts --channel no-recommendation
 ```
 
 That writes `dist/channels/no-recommendation/` and leaves the committed
-marketplace tree alone. A skill must not link to anything inside the
-recommendation section, or that copy's link check fails.
+marketplace tree alone. The steering checks keep anything else out of the
+section, so removing it removes only the recommendation. In that copy, nothing
+may refer to the removed section ("as recommended", "described above", "the
+recommendation") or repeat its bold trade-off labels, and the preference
+wordlist applies to the whole body.
 
 ### Skills owned by another repository
 
