@@ -36,8 +36,18 @@ describe("secret-in-conversation", () => {
     ["writing a .env file without reading it", fenced("touch .env")],
     ["a node one-liner reading the example env file", fenced(`node -e "console.log(require('fs').readFileSync('.env.example', 'utf8'))"`)],
     ["starting an app with an env file", fenced("node --env-file=.env server.ts")],
+    ["requesting an export from a service", "The tenant owner can request a password-hash export, held 24 hours."],
+    ["requesting a credential export", "The owner requests the credential export on the tenant."],
   ])("allows %s", (_label, text) => {
     expect(rules(text)).not.toContain("secret-in-conversation");
+  });
+
+  test.each([
+    ["handing an export into the conversation", "Paste the password-hash export here."],
+    ["requesting the hashes themselves", "Request the password hashes from the person."],
+    ["requesting a secret beside an export", "Request a password-hash export and request the client secret."],
+  ])("still flags %s", (_label, text) => {
+    expect(rules(text)).toContain("secret-in-conversation");
   });
 });
 

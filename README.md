@@ -136,7 +136,9 @@ size. A non-Markdown text file is treated as code throughout.
 1. **No secret in the conversation.** A skill never asks for a secret, token,
    key, password, credential or connection string to be pasted, shared, shown,
    asked for, requested or prompted for. A negation only excuses its own clause:
-   "This is not optional: paste the token" is flagged. It never runs a command
+   "This is not optional: paste the token" is flagged. Requesting an export
+   from a service ("the owner can request a password-hash export") is not a
+   handover, but handing that export over ("paste the export here") is. It never runs a command
    that prints one, such as:
    - a secret-looking variable (`echo "$DATABASE_URL"`, `$env:CLIENT_SECRET`);
    - the environment (`printenv`, `env`, `export -p`, `declare -x`,

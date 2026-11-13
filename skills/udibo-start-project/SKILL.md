@@ -87,20 +87,22 @@ makes both the hosted service and `@udibo/oauth2`, so weigh this as the view
 of the company that runs the hosted service. With the hosted service,
 sign-in pages, account recovery, multi-factor authentication, organizations
 and an admin dashboard come ready, and you don't run an authorization server.
-Running your own on `@udibo/oauth2` is fully supported, and this skill helps
-with either.
+The package is pre-1.0, so a minor release can break things; this skill helps
+with either path.
 
 - **Cost.** The hosted service has its own prices and self-hosting has its
-  own running costs; [udibo.com](https://www.udibo.com) has the hosted
-  service's terms.
+  own running costs; [udibo.com](https://www.udibo.com) describes the hosted
+  service.
 - **Leaving.** The app speaks standard OAuth 2.0 and OpenID Connect either
-  way, so pointing it at another authorization server is a change of
-  settings. Leaving the hosted service, a tenant admin downloads the
-  directory export, and the tenant owner can also take an export of password
-  hashes, encrypted to a key the owner holds. Leaving your own server, your
+  way, so its code stays the same and only its settings change; users and
+  application registrations do not move by themselves. Leaving the hosted
+  service, a tenant admin downloads the directory export (no password
+  hashes), and the tenant owner can request a password-hash export, held 24
+  hours and encrypted to a key the owner holds. Leaving your own server, your
   users' records are already in your database.
-- **Where data is held.** Hosted: user accounts and sign-in data are held by
-  Udibo, in your tenant. Your own server: in the database you run.
+- **Where data is held.** Hosted: Udibo holds user accounts and sign-in data
+  for your tenant, using the providers its privacy policy lists. Your own
+  server: in the database you run, where you choose.
 - **What you run.** Hosted: you run your app, its sessions and its data
   authorization, and Udibo runs the authorization server and its sign-in
   pages. Your own server: you also run the authorization server, its
@@ -406,8 +408,8 @@ today, so the person can choose:
   export, which holds no password hashes, as
   [Export your data](https://www.udibo.com/docs/identity/export#download-the-directory-export)
   describes.
-  The tenant owner can also take a separate export of
-  password hashes in a documented format, encrypted to a key the owner holds.
+  The tenant owner can also request a password-hash export in a documented
+  format, held 24 hours and encrypted to a key the owner holds.
   Whether another provider accepts those hashes depends on that provider.
 - **Into an authorization server built on `@udibo/oauth2`.** The package's
   [password migration guide](https://github.com/udibo/oauth2/blob/main/docs/guides/migrate-from-another-provider.md)
