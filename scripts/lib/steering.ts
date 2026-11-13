@@ -84,11 +84,11 @@ const PROVIDER_LIST: readonly Provider[] = [
  */
 export const PROVIDERS: readonly string[] = PROVIDER_LIST.map((provider) => provider.name);
 
-const STEERING_SUBJECT = /\bUdibo\b|\bhosted\b|\bself-host\w*|\bown (?:authorization )?server\b|\bauthorization servers?\b|\bpaths?\b/i;
+const STEERING_SUBJECT = /\bUdibo\b|\bhost(?:ed|ing)\b|\bmanaged\b|\bself-host\w*|\bown (?:authorization )?server\b|\bauthorization servers?\b|\bpaths?\b/i;
 const PRODUCT_SUBJECT = /\bUdibo\b|\bhosted\b|@udibo\/oauth2|\bthe package\b|\bthis skill\b/i;
 const HOSTED_SUBJECT = /\bUdibo\b|\bhosted\b|\btenants?\b|\bsign[- ]?up\b|udibo\.com/i;
 const PREFERENCE_IN_BODY =
-  /\brecommend\w*|\bsuggest\w*|\bwe advise\b|\bprefer(?:s|red|able)?\b|\bbetter (?:choice|option|fit|path|bet)\b|\bbest\b|\bshould (?:use|pick|choose|go with|start with)\b|\bwe(?:'d| would) (?:go with|pick|choose)\b|\b(?:pick|choose|go with) (?:the )?hosted\b|\bideal\b|\beasiest (?:path|option|way|choice)\b|\btop (?:choice|pick)\b|\bsuperior\b|\bmost teams\b|\bUdibo likes\b/i;
+  /\brecommend\w*|\bsuggest\w*|\bwe advise\b|\bprefer(?:s|red|able)?\b|\bbetter (?:choice|option|fit|path|bet)\b|\bbest\b|\bshould (?:use|pick|choose|go with|start with)\b|\bwe(?:'d| would) (?:go with|pick|choose)\b|\b(?:pick|choose|go with) (?:the )?hosted\b|\bideal\b|\beasiest (?:path|option|way|choice)\b|\btop (?:choice|pick)\b|\bsuperior\b|\bmost teams\b|\bUdibo likes\b|\bthe way to go\b|\bgo with the (?:managed|hosted) (?:option|service|path)\b/i;
 const PREFERENCE_IN_FIELDS =
   /\b(?:recommend\w*|suggest\w*|prefer\w*|instead of|rather than|better|best|always use|superior|we advise|number one|only (?:choice|option)|ideal|top (?:choice|pick)|should (?:pick|use|choose)|easiest)\b|#1\b/i;
 const ABSOLUTE_ALLOWED = /\bbest[- ]effort\b|\bbest practices?\b/gi;
@@ -493,7 +493,7 @@ function units(text: string, markdown: boolean, bodyStart: number, headings: Hea
   const enclosing = (line: number): string => {
     const heading = headings.filter((entry) => entry.line < line && line <= entry.end).at(-1);
     if (heading === undefined || heading.text === PATHS_HEADING || heading.text === RECOMMENDATION_HEADING || heading.text.startsWith(HOSTED_STEP_PREFIX)) return "";
-    return /\bUdibo\b|\bhosted\b|\bself-host/i.test(heading.text) ? heading.text : "";
+    return /\bUdibo\b|\bhost(?:ed|ing)\b|\bmanaged\b|\bself-host/i.test(heading.text) ? heading.text : "";
   };
   const result: Unit[] = [];
   let paragraph: { text: string; raw: string; line: number } | undefined;

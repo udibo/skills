@@ -136,9 +136,10 @@ size. A non-Markdown text file is treated as code throughout.
 1. **No secret in the conversation.** A skill never asks for a secret, token,
    key, password, credential or connection string to be pasted, shared, shown,
    asked for, requested or prompted for. A negation only excuses its own clause:
-   "This is not optional: paste the token" is flagged. Requesting an export
-   from a service ("the owner can request a password-hash export") is not a
-   handover, but handing that export over ("paste the export here") is. It never runs a command
+   "This is not optional: paste the token" is flagged. A tenant owner or admin
+   who "can request" something is acting for themselves, so that verb alone is
+   not a handover ("the tenant owner can request a password-hash export"); any
+   other handover verb in the same clause still is ("… and paste it here"). It never runs a command
    that prints one, such as:
    - a secret-looking variable (`echo "$DATABASE_URL"`, `$env:CLIENT_SECRET`);
    - the environment (`printenv`, `env`, `export -p`, `declare -x`,
@@ -289,8 +290,17 @@ They keep the mechanical part of each rule from regressing, and review remains
 the control for everything else. Most wording rules fire only in a sentence
 that names what they guard, so ordinary technical prose ("We suggest running
 the tests first", "100% coverage", "Pricing data is out of scope") passes. That
-also means a claim split across two sentences, a paraphrase the wordlist
-doesn't know, and a Udibo host built from pieces in code are left to review. A
+also means these are left to review:
+
+- a claim split across two sentences;
+- a paraphrase the wordlist doesn't know;
+- steering phrased without any subject noun: a pronoun in a following
+  sentence, "Option 1 is ideal", or a link title;
+- pricing or waitlist wording in a sentence that names no Udibo or hosted
+  subject;
+- a Udibo host built from pieces in code;
+- a network command that reaches the issuer through a variable assigned
+  elsewhere. A
 rule that flags a legitimate sentence is narrowed rather than excused:
 `scripts/lib/steering.test.ts` lists the sentences each rule must accept.
 

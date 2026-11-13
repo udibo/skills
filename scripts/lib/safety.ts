@@ -36,7 +36,7 @@ const SECRET_NOUN =
   /\b(?:secrets?|api[ _-]?keys?|access[ _-]?keys?|private[ _-]?keys?|signing[ _-]?keys?|client[ _-]?secrets?|tokens?|passwords?|passphrases?|credentials?|connection[ _-]?strings?|database[ _-]?urls?|cookies?)\b|\.env\b/i;
 const HANDOVER_VERB =
   /\b(?:paste|share|send|give|provide|enter|type|tell|show|reveal|print|echo|display|output|copy|ask|request|prompt|dictate|read\s+out)\b/i;
-const EXPORT_REQUEST = /\brequest(?:s|ed)?\s+(?:a|an|the)\s+(?:[\w-]+\s+)?export\b/gi;
+const OWNER_REQUESTS = /\b((?:tenant\s+)?(?:owner|admin)\b[^.;:\n]*?\bcan\s+(?:also\s+)?)request\b/gi;
 const NEGATION = /\b(?:never|not|don't|do not|must not|mustn't|avoid|without|no|nothing|none)\b|n't\b/i;
 
 const SECRET_VARIABLE_NAME =
@@ -233,7 +233,7 @@ export function checkSafety(text: string, options: { markdown?: boolean } = {}):
   for (const paragraph of proseParagraphs) {
     for (const clause of clauses(paragraph.text)) {
       if (NEGATION.test(clause)) continue;
-      const asked = clause.replace(EXPORT_REQUEST, " ");
+      const asked = clause.replace(OWNER_REQUESTS, "$1");
       if (HANDOVER_VERB.test(asked) && SECRET_NOUN.test(asked)) {
         add(
           "secret-in-conversation",

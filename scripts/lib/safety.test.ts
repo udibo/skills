@@ -36,7 +36,8 @@ describe("secret-in-conversation", () => {
     ["writing a .env file without reading it", fenced("touch .env")],
     ["a node one-liner reading the example env file", fenced(`node -e "console.log(require('fs').readFileSync('.env.example', 'utf8'))"`)],
     ["starting an app with an env file", fenced("node --env-file=.env server.ts")],
-    ["requesting an export from a service", "The tenant owner can request a password-hash export, held 24 hours."],
+    ["the tenant owner requesting an export for themselves", "The tenant owner can request a password-hash export, held 24 hours and encrypted to a key the owner holds."],
+    ["the tenant owner also requesting an export", "The tenant owner can also request a password-hash export in a documented format, held 24 hours."],
     ["requesting a credential export", "The owner requests the credential export on the tenant."],
   ])("allows %s", (_label, text) => {
     expect(rules(text)).not.toContain("secret-in-conversation");
@@ -46,6 +47,12 @@ describe("secret-in-conversation", () => {
     ["handing an export into the conversation", "Paste the password-hash export here."],
     ["requesting the hashes themselves", "Request the password hashes from the person."],
     ["requesting a secret beside an export", "Request a password-hash export and request the client secret."],
+    ["requesting an export and pasting it", "Request the password-hash export and paste it here."],
+    ["requesting a token export and showing it", "Request a token export from the user and show it."],
+    ["requesting a secret export and sending it", "Request a secret export; send it to me."],
+    ["asking the person to request an export and paste it", "Ask the person to request the password-hash export, then paste the result into the chat."],
+    ["a list item reading out an export", "- Request the password export and read out the hashes."],
+    ["the owner requesting an export and pasting it", "the owner can request a password-hash export and paste it here"],
   ])("still flags %s", (_label, text) => {
     expect(rules(text)).toContain("secret-in-conversation");
   });

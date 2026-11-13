@@ -115,6 +115,20 @@ describe.each(NAMES)("%s", (name) => {
       expect(await rulesHit(copy.dir)).toEqual(["steering-paths"]);
     });
 
+    test.runIf(hasPaths)("is rejected once a path links to a page that does not serve it", async () => {
+      await using copy = await mutated(name, (text) => text.replace(/^(- \*\*Hosted: Udibo Identity\.\*\*[\s\S]*?\]\()[^)]+\)/m, "$1https://example.com)"));
+      expect(await readFile(path.join(copy.dir, "SKILL.md"), "utf8")).toMatch(/\]\(https:\/\/example\.com\)/);
+      expect(await rulesHit(copy.dir)).toEqual(["steering-paths"]);
+    });
+
+    test.runIf(hasPaths)("is rejected once a path anchors to a section that does not serve it", async () => {
+      await using copy = await mutated(name, (text) => text.replace(/^(- \*\*Your own authorization server on `@udibo\/oauth2`\.\*\*[\s\S]*?\]\()[^)]+\)/m, "$1#rules-for-the-whole-skill)"));
+      expect(await readFile(path.join(copy.dir, "SKILL.md"), "utf8")).toContain("](#rules-for-the-whole-skill)");
+      expect((await loadSkill(copy.dir)).issues.map((issue) => issue.message)).toEqual([
+        '[steering-paths] link "#rules-for-the-whole-skill" goes to "Rules for the whole skill", which does not serve **Your own authorization server on @udibo/oauth2**',
+      ]);
+    });
+
     test.runIf(hasPaths)("is rejected once the recommendation moves after the first command", async () => {
       await using copy = await mutated(name, (text) => `${text.replace(recommendation, "")}\n${recommendation}`);
       expect(await rulesHit(copy.dir)).toEqual(["steering-order"]);
