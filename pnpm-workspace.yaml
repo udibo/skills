@@ -1,2 +1,3 @@
 minimumReleaseAge: 4320
-allowBuilds: {}
+allowBuilds:
+  "@anthropic-ai/claude-code": false

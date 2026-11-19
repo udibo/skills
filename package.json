@@ -16,6 +16,7 @@
     "check-release": "node scripts/check-release.ts"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-code": "2.1.325",
     "@hono/node-server": "2.1.6",
     "@types/node": "26.6.5",
     "@udibo/oauth2": "0.52.0",

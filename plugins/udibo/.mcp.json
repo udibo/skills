@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "udibo-docs": {
+      "type": "http",
+      "url": "https://mcp.udibo.com/docs"
+    }
+  }
+}

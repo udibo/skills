@@ -109,8 +109,12 @@ export function renderManifests(listed: boolean): Map<string, Buffer> {
     }),
   );
   if (listed) {
+    outputs.set(
+      `${PLUGIN_DIR}/.mcp.json`,
+      stableJson({ mcpServers: { "udibo-docs": { type: "http", url: "https://mcp.udibo.com/docs" } } }),
+    );
     const shared = { name: PLUGIN_NAME, description: PLUGIN_DESCRIPTION, author: { name: OWNER.name }, repository: REPOSITORY };
-    outputs.set(`${PLUGIN_DIR}/.claude-plugin/plugin.json`, stableJson({ ...shared, homepage: REPOSITORY }));
+    outputs.set(`${PLUGIN_DIR}/.claude-plugin/plugin.json`, stableJson({ ...shared, homepage: REPOSITORY, privacyPolicyUrl: "https://www.udibo.com/privacy" }));
     outputs.set(`${PLUGIN_DIR}/.cursor-plugin/plugin.json`, stableJson(shared));
     outputs.set(
       `${PLUGIN_DIR}/.codex-plugin/plugin.json`,

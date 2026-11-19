@@ -123,7 +123,7 @@ describe("verifyDist", () => {
 describe("verifyDist allows only the files the build writes", () => {
   test.each([
     ["a hooks file in the plugin", "plugin-marketplace/plugins/udibo/hooks/hooks.json"],
-    ["an MCP config in the plugin", "plugin-marketplace/plugins/udibo/.mcp.json"],
+    ["an extra MCP config in the plugin", "plugin-marketplace/plugins/udibo/extra-mcp.json"],
     ["a script at the root of dist", "evil.sh"],
     ["an extra file inside a skill copy", "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-migration/extra.md"],
   ])("rejects %s", async (_label, file) => {
@@ -132,6 +132,16 @@ describe("verifyDist allows only the files the build writes", () => {
     await mkdir(path.dirname(path.join(distDir, file)), { recursive: true });
     await writeFile(path.join(distDir, file), "{}");
     expect(await verifyDist(distDir)).toEqual([`${file}: not produced by the build`]);
+  });
+
+  test("rejects a docs connector pointed at a different endpoint", async () => {
+    await using dir = await tempDir();
+    const distDir = await builtPlaceholders(dir.path);
+    const file = "plugin-marketplace/plugins/udibo/.mcp.json";
+    await writeFile(path.join(distDir, file), JSON.stringify({
+      mcpServers: { "udibo-docs": { type: "http", url: "https://example.org/docs" } },
+    }));
+    expect(await verifyDist(distDir)).toEqual([`${file}: differs from what the build produces`]);
   });
 
   test("rejects a plugin manifest rewritten to add hooks", async () => {
