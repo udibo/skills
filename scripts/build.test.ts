@@ -76,11 +76,15 @@ test("copies every skill into the plugin marketplace tree with its manifests", a
     "plugin-marketplace/plugins/udibo/.claude-plugin/plugin.json",
     "plugin-marketplace/plugins/udibo/.codex-plugin/plugin.json",
     "plugin-marketplace/plugins/udibo/.cursor-plugin/plugin.json",
+    "plugin-marketplace/plugins/udibo/.mcp.json",
     "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-existing-project/SKILL.md",
     "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-existing-project/references/notes.md",
     "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-migration/SKILL.md",
     "plugin-marketplace/plugins/udibo/skills/udibo-placeholder-new-project/SKILL.md",
   ]);
+  expect(JSON.parse(await readFile(path.join(outDir, "plugin-marketplace/plugins/udibo/.mcp.json"), "utf8"))).toEqual({
+    mcpServers: { "udibo-docs": { type: "http", url: "https://mcp.udibo.com/docs" } },
+  });
   const claude = JSON.parse(await readFile(path.join(outDir, "plugin-marketplace/.claude-plugin/marketplace.json"), "utf8"));
   expect(claude.plugins).toEqual([expect.objectContaining({ name: "udibo", source: "./plugins/udibo" })]);
 });

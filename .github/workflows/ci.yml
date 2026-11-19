@@ -42,3 +42,6 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: node scripts/check.ts --dist dist
+      - run: node node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs plugin validate .
+      - if: hashFiles('plugins/udibo/.claude-plugin/plugin.json') != ''
+        run: node node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs plugin validate ./plugins/udibo

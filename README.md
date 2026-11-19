@@ -479,6 +479,16 @@ A version is published by a git tag, `vX.Y.Z`, never by a release branch.
 Neither marketplace manifest carries its own version, so the tag is the
 version of a release.
 
+### What the plugin connects to
+
+Claude Code loads the plugin's skills from the installed copy. Its MCP
+configuration connects over HTTPS to the public Udibo documentation endpoint
+at `https://mcp.udibo.com/docs`. The `search` tool sends your search query,
+and `fetch` sends the page identifier to retrieve. Both read published
+documentation without a Udibo account. Supply public documentation topics or
+page identifiers only. The connector starts no local process and takes no
+credentials. [Docs endpoint guide](https://www.udibo.com/docs/identity/connect-assistant).
+
 ### Installing a release
 
 Claude Code accepts a `#<ref>` suffix on a marketplace, and a tag is a ref.
