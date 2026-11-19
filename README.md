@@ -19,6 +19,7 @@ and the skill then follows the person's choice. The
 | Skill | What it does |
 | ----- | ------------ |
 | [`udibo-start-project`](skills/udibo-start-project/SKILL.md) | Starts a new Hono web app with sign-in through `@udibo/oauth2`, either on a hosted Udibo Identity tenant the person creates or on an authorization server they run, starting on the package's local development identity provider with no account needed. |
+| [`udibo-add-to-project`](skills/udibo-add-to-project/SKILL.md) | Integrates sign-in into an existing Hono application or React Router app on Hono. When the app already has an issuer, it keeps that issuer for the first phase. |
 
 No version is tagged yet. The three skills under `test/fixtures/` are
 placeholders the tests use; they are not guidance, so don't follow them.

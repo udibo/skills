@@ -122,10 +122,10 @@ describe.each(NAMES)("%s", (name) => {
     });
 
     test.runIf(hasPaths)("is rejected once a path anchors to a section that does not serve it", async () => {
-      await using copy = await mutated(name, (text) => text.replace(/^(- \*\*Your own authorization server on `@udibo\/oauth2`\.\*\*[\s\S]*?\]\()[^)]+\)/m, "$1#rules-for-the-whole-skill)"));
-      expect(await readFile(path.join(copy.dir, "SKILL.md"), "utf8")).toContain("](#rules-for-the-whole-skill)");
+      await using copy = await mutated(name, (text) => text.replace(/^(- \*\*Your own authorization server on `@udibo\/oauth2`\.\*\*[\s\S]*?\]\()[^)]+\)/m, "$1#fixture-unrelated-heading)") + "\n## Fixture unrelated heading\n");
+      expect(await readFile(path.join(copy.dir, "SKILL.md"), "utf8")).toContain("](#fixture-unrelated-heading)");
       expect((await loadSkill(copy.dir)).issues.map((issue) => issue.message)).toEqual([
-        '[steering-paths] link "#rules-for-the-whole-skill" goes to "Rules for the whole skill", which does not serve **Your own authorization server on @udibo/oauth2**',
+        '[steering-paths] link "#fixture-unrelated-heading" goes to "Fixture unrelated heading", which does not serve **Your own authorization server on @udibo/oauth2**',
       ]);
     });
 

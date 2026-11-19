@@ -4,7 +4,7 @@ description: Start a new web project, in a new or empty directory, that signs pe
 license: MIT
 compatibility: Needs Node.js 24 or later, npm, and access to the npm registry. Written for a new, empty project directory.
 metadata:
-  version: "0.2.0"
+  version: "0.2.1"
   targets: "@udibo/oauth2@0.52.0, hono@4.13.17, @hono/node-server@2.1.6"
 ---
 
@@ -51,8 +51,8 @@ First confirm two things with the person:
 
 1. The new project directory. It must be empty, or not exist yet. If it
    already holds code, or the project already signs people in with an
-   identity provider, stop: this skill starts new projects only. Tell them
-   what exists today, from
+   identity provider, use `udibo-add-to-project` for the existing app. For
+   a change of issuer, begin with
    [Migrating between authorization servers](#migrating-between-authorization-servers).
 2. Whether they are starting from a Udibo starter project instead. If they
    are, stop here and follow that starter's README; this skill builds its own
