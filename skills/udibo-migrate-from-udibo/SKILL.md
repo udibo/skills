@@ -79,7 +79,15 @@ then decrypts in the destination's controlled import environment. Validate
 each compact JWE's authenticated request ID, consecutive index and final
 marker. Stage the complete batch before enabling sign-in. A missing last
 chunk, unexpected request, duplicate ID or unmapped account stops the batch.
-Keep the source running during rehearsal.
+Keep the source running during rehearsal. Immediately before enabling each
+cohort, including the first pilot, the operator must reconcile changes since
+the earliest snapshot. Cover password resets, account disablement or deletion,
+factor changes and revoked memberships and permissions. Either hold changes
+during a coordinated final export and switch, or bring the destination up to
+date through a verified change feed and fence new writes at handover. Keep
+urgent revocations effective on both sides. If freshness cannot be verified,
+leave destination sign-in closed for the affected accounts and use recovery
+or a fresh, reconciled export.
 
 ## Your own authorization server
 
@@ -100,7 +108,14 @@ verification, lockout and session policies when adding the legacy verifier.
 import { IdentityService } from "@udibo/oauth2/identity";
 import { pbkdf2Verifier } from "@udibo/oauth2/identity/migration";
 
-// Call after matching the directory account and checking its eligibility.
+// Supply user records from the verified directory artifact for this tenant.
+export function eligibleDirectoryUser(directoryUsers, userId) {
+  const user = directoryUsers.get(userId);
+  if (!user) throw new Error("Credential row has no mapped directory account.");
+  return user.disabledAt === null && user.deletedAt === null ? user : null;
+}
+
+// Only stage credentials for accounts returned by eligibleDirectoryUser.
 export function importedPbkdf2(row) {
   if (row.password === null) return null;
   const { format, value } = row.password;

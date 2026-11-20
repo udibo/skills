@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 import type { PasswordCredential } from "@udibo/oauth2/identity";
 import { IdentityService } from "@udibo/oauth2/identity";
-import { CompactEncrypt, compactDecrypt, generateKeyPair } from "jose";
+import { calculateJwkThumbprint, CompactEncrypt, compactDecrypt, exportJWK, generateKeyPair } from "jose";
 import { expect, test } from "vitest";
 
 import { fixtureProject, readSkillDocument, writeFileBlocks } from "../lib/fixture.ts";
@@ -17,12 +17,22 @@ test("a synthetic directory and encrypted credential row reach a destination sig
   expect(skill.files.map((file) => file.path)).toEqual(["migration/identity.mjs"]);
   await using project = await fixtureProject(root);
   await writeFileBlocks(project.path, skill.files);
-  const { createMigrationIdentity, importedPbkdf2 } = await import(pathToFileURL(path.join(project.path, "migration/identity.mjs")).href);
+  const { createMigrationIdentity, eligibleDirectoryUser, importedPbkdf2 } = await import(pathToFileURL(path.join(project.path, "migration/identity.mjs")).href);
 
   const tenantId = randomUUID();
   const requestId = randomUUID();
   const sourceUserId = randomUUID();
-  const directory = { tenantId, users: [{ id: sourceUserId, username: "pilot" }] };
+  const createdAt = new Date().toISOString();
+  const pilot = { id: sourceUserId, username: "pilot", disabledAt: null, deletedAt: null };
+  const disabled = { ...pilot, id: randomUUID(), username: "disabled", disabledAt: createdAt };
+  const deleted = { ...pilot, id: randomUUID(), username: "deleted", deletedAt: createdAt };
+  const directory = [
+    { type: "manifest", record: { format: "udibo.directory-export.v2", tenantId, createdAt, containsCredentials: false } },
+    ...[pilot, disabled, deleted].map(record => ({ type: "user", record })),
+  ].map(line => JSON.stringify(line)).join("\n");
+  const [first, ...accounts] = directory.split("\n").map(line => JSON.parse(line));
+  expect(first).toMatchObject({ type: "manifest", record: { tenantId, format: "udibo.directory-export.v2", containsCredentials: false } });
+  const directoryUsers = new Map(accounts.filter(line => line.type === "user").map(line => [line.record.id, line.record]));
   const password = randomBytes(24).toString("hex");
   const salt = randomBytes(16).toString("hex");
   const digest = pbkdf2Sync(password, salt, 100_000, 32, "sha256").toString("base64");
@@ -32,15 +42,31 @@ test("a synthetic directory and encrypted credential row reach a destination sig
   };
   const { privateKey, publicKey } = await generateKeyPair("RSA-OAEP-256");
   const bound = { req: requestId, idx: 0, fin: true };
-  const chunk = await new CompactEncrypt(new TextEncoder().encode(JSON.stringify([row])))
+  const thumbprint = await calculateJwkThumbprint(await exportJWK(publicKey));
+  const manifest = {
+    format: "udibo.credential-export.v1", requestId, tenantId, createdAt,
+    recipientThumbprint: thumbprint, includesMfaSecrets: false,
+    encryption: { alg: "RSA-OAEP-256", enc: "A256GCM", serialization: "compact", chunkPayload: "json-array" },
+  };
+  const rows = [pilot, disabled, deleted].map(user => ({ ...row, userId: user.id, username: user.username }));
+  const chunk = await new CompactEncrypt(new TextEncoder().encode(JSON.stringify(rows)))
     .setProtectedHeader({ alg: "RSA-OAEP-256", enc: "A256GCM", udibo: bound }).encrypt(publicKey);
-  const { protectedHeader, plaintext } = await compactDecrypt(chunk, privateKey, {
+  const artifact = [JSON.stringify(manifest), chunk].join("\n");
+  const [header, encrypted] = artifact.split("\n");
+  expect(JSON.parse(header!)).toMatchObject({
+    tenantId: first.record.tenantId, requestId, recipientThumbprint: thumbprint, includesMfaSecrets: false,
+    format: "udibo.credential-export.v1",
+  });
+  const { protectedHeader, plaintext } = await compactDecrypt(encrypted!, privateKey, {
     keyManagementAlgorithms: ["RSA-OAEP-256"], contentEncryptionAlgorithms: ["A256GCM"],
   });
   expect(protectedHeader.udibo).toEqual(bound);
-  const [record] = JSON.parse(new TextDecoder().decode(plaintext)) as [typeof row];
-  const sourceUser = directory.users.find((user) => user.id === record.userId);
-  if (!sourceUser) throw new Error("Fixture account mapping missing");
+  const decoded = JSON.parse(new TextDecoder().decode(plaintext)) as (typeof row)[];
+  const eligible = decoded.filter(record => eligibleDirectoryUser(directoryUsers, record.userId));
+  expect(eligible.map(record => record.userId)).toEqual([pilot.id]);
+  expect(() => eligibleDirectoryUser(directoryUsers, randomUUID())).toThrow("no mapped directory account");
+  const record = eligible[0]!;
+  const sourceUser = eligibleDirectoryUser(directoryUsers, record.userId);
   expect(importedPbkdf2({ password: null })).toBeNull();
   expect(() => importedPbkdf2({ password: { format: "legacy", value: "unknown" } })).toThrow();
   expect(() => importedPbkdf2({ password: { format: "pbkdf2-sha256", value: "invalid" } })).toThrow();
@@ -63,6 +89,9 @@ test("a synthetic directory and encrypted credential row reach a destination sig
     setCredential: async () => { throw new Error("The native upgrade must compare and set"); },
   };
   const destination = createMigrationIdentity({ users });
+  for (const refused of [disabled, deleted]) {
+    expect(await destination.signIn({ identifier: refused.username, password })).toBeNull();
+  }
   expect(await destination.signIn({ identifier: "pilot", password: randomUUID() })).toBeNull();
   expect(native).toBeUndefined();
   expect(legacy).toBe(record.password.value);
