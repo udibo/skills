@@ -180,7 +180,12 @@ describe.each(NAMES)("%s", (name) => {
     });
 
     test("is rejected once it declares a migration direction the harness does not know", async () => {
-      await using copy = await mutated(name, (text) => text.replace("metadata:\n", 'metadata:\n  moves-users: "sideways"\n'));
+      await using copy = await mutated(name, (text) => {
+        const direction = /^  moves-users: "([^"]+)"$/m;
+        return direction.test(text)
+          ? text.replace(direction, '  moves-users: "$1, sideways"')
+          : text.replace("metadata:\n", 'metadata:\n  moves-users: "sideways"\n');
+      });
       expect((await loadSkill(copy.dir)).issues.map((issue) => issue.message)).toEqual([
         '[steering-migration] metadata.moves-users has "sideways"; use any of onto-udibo, off-udibo, between-other-providers',
       ]);
