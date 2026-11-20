@@ -184,6 +184,9 @@ importers:
       hono:
         specifier: 4.13.17
         version: 4.13.17
+      jose:
+        specifier: 6.2.12
+        version: 6.2.12
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -671,6 +674,9 @@ packages:
   hono@4.13.17:
     resolution: {integrity: sha512-vZIcbkvjOR5hHRWERbGkr8fGfF0GGM1ooYkuH448iO3b2AdVEr3AXZSw4Z3Kn+1L5z0CVoVeyV29VGYmFh05kQ==}
     engines: {node: '>=16.9.0'}
+
+  jose@6.2.12:
+    resolution: {integrity: sha512-9NiFmJEex0sy2Dk58j2UGBSHgUs2ypF9eZSu4L6vjOX3Dp96Sw1F3uL+H+D1sx02jZZdzUT0HgvCy59CuvXcWw==}
 
   json-schema-traverse@1.0.0:
     resolution: {integrity: sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug==}
@@ -1316,6 +1322,8 @@ snapshots:
     optional: true
 
   hono@4.13.17: {}
+
+  jose@6.2.12: {}
 
   json-schema-traverse@1.0.0: {}
 
