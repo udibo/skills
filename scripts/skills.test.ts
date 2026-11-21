@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 
 import { filePathProblems, pinProblems, readSkillDocument, strayCommandProblems } from "./lib/fixture.ts";
 import { loadSkill } from "./lib/skill.ts";
-import { channelText, RECOMMENDATION_HEADING } from "./lib/steering.ts";
+import { CHANNELS, channelText, RECOMMENDATION_HEADING } from "./lib/steering.ts";
 import { tempDir } from "./lib/testing.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -34,6 +34,20 @@ async function rulesHit(dir: string, channel: "full" | "no-recommendation" = "fu
 
 test("the repository publishes at least one skill", () => {
   expect(NAMES.length).toBeGreaterThan(0);
+});
+
+test.each(CHANNELS)("project skills use the package skill from the same %s distribution", async (channel) => {
+  const companion = await readFile(path.join(ROOT, "plugins/udibo/skills/udibo-oauth2/SKILL.md"), "utf8");
+  const packageCopy = channelText(companion, channel);
+  expect(packageCopy).toContain("name: udibo-oauth2");
+  expect(packageCopy.includes(`### ${RECOMMENDATION_HEADING}`)).toBe(channel === "full");
+  for (const name of ["udibo-start-project", "udibo-add-to-project"]) {
+    const markdown = channelText(SOURCES.get(name)!, channel);
+    const ownServer = markdown.split(/^#{2,3} Your own authorization server$/m)[1]?.split(/^#{2,3} /m)[0];
+    expect(ownServer).toContain("`udibo-oauth2`");
+    expect(ownServer).not.toMatch(/https?:\/\/[^)\s]+\/SKILL\.md\b/i);
+    expect(ownServer).toContain("/docs/guides/become-an-oauth-provider.md");
+  }
 });
 
 describe.each(NAMES)("%s", (name) => {
