@@ -4,7 +4,7 @@ description: Start a new web project, in a new or empty directory, that signs pe
 license: MIT
 compatibility: Needs Node.js 24 or later, npm, and access to the npm registry. Written for a new, empty project directory.
 metadata:
-  version: "0.2.1"
+  version: "0.2.2"
   targets: "@udibo/oauth2@0.52.0, hono@4.13.17, @hono/node-server@2.1.6"
 ---
 
@@ -378,9 +378,11 @@ If the sign-in fails, check these before changing code:
 
 On this path the app runs against the local development provider from
 Step 4, which is for development only. To serve real users, the person runs
-an authorization server built on `@udibo/oauth2`. The package does not ship
-an agent skill for that yet, so work from its guides, and build only what the
-person approves, one plan at a time:
+an authorization server built on `@udibo/oauth2`. Use the package’s
+[authorization server skill](https://github.com/udibo/skills/blob/main/plugins/udibo/skills/udibo-oauth2/SKILL.md)
+to plan the issuer. Check its target package version against the issuer’s
+lockfile and get approval for any version change. These guides cover the
+parts the person chooses to build.
 
 - [Host authorization for your app](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md):
   the authorization server's services, endpoints, grants, consent, refresh
