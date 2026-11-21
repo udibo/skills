@@ -5,6 +5,7 @@ import { copyFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { fixtureProject, readSkillDocument, writeFileBlocks } from "./lib/fixture.ts";
+import { readTurn, runEvaluation, selectedFiles } from "./lib/eval-turns.ts";
 import { replayLocalSignIn } from "./lib/local-sign-in.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -22,13 +23,6 @@ export function planPrompt(): string {
   ].join("\n");
 }
 
-function readTurn(turn: unknown): { message: string; files: number[] } {
-  assert.ok(turn && typeof turn === "object" && "message" in turn && "files" in turn &&
-    Object.keys(turn).length === 2 && typeof turn.message === "string" && turn.message.trim() &&
-    Array.isArray(turn.files) && turn.files.every(Number.isSafeInteger), "expected a message and file-block numbers");
-  return { message: turn.message, files: turn.files };
-}
-
 export function choicePrompt(plan: unknown): string {
   assert.equal(readTurn(plan).files.length, 0, "the agent attempted a file change before approval");
   return [
@@ -43,11 +37,7 @@ export function choicePrompt(plan: unknown): string {
 export async function grade(plan: unknown, implementation: unknown): Promise<string> {
   choicePrompt(plan);
   const { files } = readTurn(implementation);
-  const selected = files.map(line => {
-    const block = document.files.find(file => file.line === line);
-    assert.ok(block, "selected a file block outside the reviewed skill");
-    return block;
-  });
+  const selected = selectedFiles(files, document.files);
   await using project = await fixtureProject(ROOT);
   await writeFile(path.join(project.path, "package.json"), JSON.stringify({ type: "module" }));
   await writeFileBlocks(project.path, selected);
@@ -63,20 +53,4 @@ export async function grade(plan: unknown, implementation: unknown): Promise<str
   return JSON.stringify({ skill: document.name, sha256: digest, fixture: "local-sign-in", signedIn: true, signedOut: true });
 }
 
-async function turnFile(file: string): Promise<unknown> {
-  return JSON.parse(await readFile(file, "utf8"));
-}
-
-if (import.meta.main) {
-  const [action, first, second, ...extra] = process.argv.slice(2);
-  try {
-    if (action === "prompt" && first === undefined) console.log(planPrompt());
-    else if (action === "choose" && first && second === undefined) console.log(choicePrompt(await turnFile(first)));
-    else if (action === "grade" && first && second && !extra.length) console.log(await grade(await turnFile(first), await turnFile(second)));
-    else throw new Error();
-  } catch {
-    // Model replies, provider banners and callback URLs can contain private values.
-    console.error("Evaluation failed. Check the command, JSON turns, selected file blocks and local fixture prerequisites.");
-    process.exitCode = 1;
-  }
-}
+if (import.meta.main) await runEvaluation({ planPrompt, choicePrompt, grade }, process.argv.slice(2));

@@ -14,6 +14,6 @@ const bff = createSignIn({
 });
 
 start({
-  mount: (app) => app.route("/pilot-auth", bff.routes()),
+  mount: (app) => app.route(process.env.FIXTURE_MOUNT, bff.routes()),
   sessionFor: (c) => bff.readSession(c),
 });
