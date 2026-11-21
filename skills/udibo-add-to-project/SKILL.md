@@ -4,7 +4,7 @@ description: Add browser sign-in to an existing Node application or adopt @udibo
 license: MIT
 compatibility: Node.js 24 or later with a server-side application. The worked integration uses Hono. The React Router path uses its existing Hono host.
 metadata:
-  version: "0.1.1"
+  version: "0.1.2"
   targets: "@udibo/oauth2@0.52.0, hono@4.13.17"
 ---
 
@@ -163,10 +163,11 @@ For a no-account local trial, use the package's
 The person starts it in their own terminal and enters its development
 settings privately. Match the callback to the registered local client.
 The provider and its seeded users are disposable. For an issuer the person
-will operate, use the package’s [authorization server skill](https://github.com/udibo/skills/blob/main/plugins/udibo/skills/udibo-oauth2/SKILL.md)
-to plan client registration, persistent stores and deployment. Check its
-target package version against the issuer’s lockfile and get approval for any
-version change. See the [authorization server guide](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md)
+will operate, use the `udibo-oauth2` skill from the same plugin or discovery
+index to plan client registration, persistent stores and deployment. Check
+its target package version against the issuer’s lockfile and get approval
+for any version change. If you have only this skill, use the package’s
+[authorization server guide](https://github.com/udibo/oauth2/blob/main/docs/guides/become-an-oauth-provider.md)
 and the [production deployment guide](https://github.com/udibo/oauth2/blob/main/docs/guides/production-deployment.md).
 
 ### Migrating between authorization servers
