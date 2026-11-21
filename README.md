@@ -21,6 +21,7 @@ and the skill then follows the person's choice. The
 | [`udibo-start-project`](skills/udibo-start-project/SKILL.md) | Starts a new Hono web app with sign-in through `@udibo/oauth2`, either on a hosted Udibo Identity tenant the person creates or on an authorization server they run, starting on the package's local development identity provider with no account needed. |
 | [`udibo-add-to-project`](skills/udibo-add-to-project/SKILL.md) | Integrates sign-in into an existing Hono application or React Router app on Hono. When the app already has an issuer, it keeps that issuer for the first phase. |
 | [`udibo-migrate-from-udibo`](skills/udibo-migrate-from-udibo/SKILL.md) | Plans and rehearses moving a hosted tenant to a different authorization server, including password continuity, a pilot and rollback. |
+| [`udibo-oauth2`](plugins/udibo/skills/udibo-oauth2/SKILL.md) | Runs a local authorization server, connects a server-side client, or protects an API with the installed `@udibo/oauth2` package. |
 
 No version is tagged yet. The three skills under `test/fixtures/` are
 placeholders the tests use; they are not guidance, so don't follow them.
@@ -36,11 +37,10 @@ Every channel is built from the same sources in this repository:
 - **Plugin marketplace.** One `udibo` plugin carrying every skill, with
   marketplace manifests for Claude Code (`.claude-plugin/`) and Cursor
   (`.cursor-plugin/`) and a plugin manifest for Codex (`.codex-plugin/`).
-- **Inside the package.** The plan is for `@udibo/oauth2` to ship its own skill
-  in its npm tarball under `skills/`, matching the installed version. No
-  published version does yet. Once one does, this repository will pull that
-  copy in rather than write its own (see
-  [Skills owned by another repository](#skills-owned-by-another-repository)).
+- **Inside the package.** `@udibo/oauth2` ships its own versioned skill at
+  `skills/udibo-oauth2/SKILL.md` in the npm package. The marketplace uses
+  the copy from the published tarball pinned in `external-skills.json`.
+  [How package-owned skills are verified](#skills-owned-by-another-repository).
 
 Install commands will be added here when the first version is tagged.
 
