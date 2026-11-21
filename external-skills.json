@@ -1,1 +1,10 @@
-{ "skills": [] }
+{
+  "skills": [
+    {
+      "name": "udibo-oauth2",
+      "package": "@udibo/oauth2",
+      "version": "0.55.3",
+      "integrity": "sha512-rw+tXBpWhs0jYyjMpujYJl/kg367OCy9RlltOi2XFvc4xUR0vCLftBzHW+7va66WFLO8uz0+NBSIiX6MoOZKRw=="
+    }
+  ]
+}
