@@ -11,6 +11,8 @@ import type { FileBlock } from "../lib/fixture.ts";
 
 import { Browser, parseBanner, startProvider } from "../lib/oidc-fixture.ts";
 
+import { LISTEN_SPY, replayLocalSignIn } from "../lib/local-sign-in.ts";
+
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const SKILL_DIR = path.join(ROOT, "skills", "udibo-start-project");
 const document = await readSkillDocument(SKILL_DIR);
@@ -65,18 +67,6 @@ async function preparedProject(dir: string): Promise<void> {
   await writeFileBlocks(dir, firstFiles());
   await runShell(COMMANDS.envFile, dir);
 }
-
-const LISTEN_SPY = `data:text/javascript,${encodeURIComponent(`
-import net from "node:net";
-const listen = net.Server.prototype.listen;
-net.Server.prototype.listen = function (...args) {
-  if (typeof args[0] === "number" || (typeof args[0] === "string" && /^\\d+$/.test(args[0]))) {
-    process.stderr.write("fixture: listen requested port " + args[0] + "\\n");
-    args[0] = 0;
-  }
-  return listen.apply(this, args);
-};
-`)}`;
 
 afterEach(stopAllProcesses);
 
@@ -160,44 +150,11 @@ describe("udibo-start-project", () => {
   test("the app command, with the person's env file, signs the seeded user in and out through the links on its pages", { timeout: 30_000 }, async () => {
     await using project = await fixtureProject(ROOT);
     await preparedProject(project.path);
-    await using provider = await startProvider(project.path, [...withoutFlag(providerArgs(), "--issuer"), "--port", "0"]);
-    const banner = parseBanner(provider.stdout());
-    const env = envExample();
-    const client = banner.clients.find((entry) => entry.id === env["AUTH_CLIENT_ID"]);
-    const user = banner.users[0];
-    if (client?.secret === undefined || user === undefined) throw new Error(`unexpected provider banner:\n${provider.stdout()}`);
-    const envPath = path.join(project.path, ".env");
-    const personal = (await readFile(envPath, "utf8"))
-      .replace(`AUTH_ISSUER=${env["AUTH_ISSUER"]}\n`, `AUTH_ISSUER=${banner.issuer}\n`)
-      .replace("AUTH_CLIENT_SECRET=\n", `AUTH_CLIENT_SECRET=${client.secret}\n`);
-    await writeFile(envPath, personal);
-
-    const { PORT: _unset, ...environment } = process.env;
-    const [, ...args] = COMMANDS.app.split(" ");
-    await using app = await startNode(["--import", LISTEN_SPY, ...args], {
-      cwd: project.path,
-      env: environment,
-      ready: (stdout) => /Listening on http:\/\/localhost:\d+/.test(stdout),
-    });
-    const callback = new URL(env["AUTH_CALLBACK_URL"] ?? "");
-    expect(/fixture: listen requested port (\d+)/.exec(app.stderr())?.[1]).toBe(callback.port);
-    const actual = /Listening on (http:\/\/localhost:\d+)/.exec(app.stdout())?.[1] ?? "";
+    const visit = await replayLocalSignIn(project.path, providerArgs(), COMMANDS.app.split(" ").slice(1));
+    expect(visit.requestedPort).toBe(visit.callback.port);
     expect(skillText).toContain("It prints `Listening on http://localhost:3000`");
-    expect(skillText).toContain(`open \`${callback.origin}\``);
-
-    const browser = new Browser({ [callback.origin]: actual });
-    const home = await browser.open(`${callback.origin}/`);
-    expect(home.body).toContain("Signed out");
-    const signInPage = await browser.followLink(home, "Sign in");
-    expect(new URL(signInPage.url).origin).toBe(new URL(banner.issuer).origin);
-    const signedIn = await browser.submitSignIn(signInPage, user);
-    expect(signedIn).toMatchObject({ url: `${callback.origin}/`, status: 200 });
-    expect(signedIn.body).toContain("Signed in as Alice Example");
+    expect(skillText).toContain(`open \`${visit.callback.origin}\``);
     expect(skillText).toContain('reading "Signed in as Alice Example"');
-
-    const signedOut = await browser.followLink(signedIn, "Sign out");
-    expect(signedOut).toMatchObject({ url: `${callback.origin}/`, status: 200 });
-    expect(signedOut.body).toContain("Signed out");
   });
 
   test("the hosted path's app command signs in against an issuer the person supplies, with only .env changed", { timeout: 30_000 }, async () => {

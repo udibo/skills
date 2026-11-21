@@ -437,11 +437,39 @@ secrets and no model calls, so a skill whose steps stop working fails CI.
   each test (SIGTERM, then SIGKILL), and exits on its own when the test
   process dies. `scripts/lib/fixture.ts` holds the shared pieces.
 
-**Agent-run evaluations are not built.** A later job could have an agent follow
-each skill against the same fixture projects. It would need a model API key,
-so it would run only after merge or on a maintainer-approved run, never on a
-pull request, because a pull request chooses the instructions the agent would
-follow. The key and its budget are not decided, so nothing here calls a model.
+### Evaluate a model on the new-project skill
+
+A maintainer can evaluate whether a model waits for approval and follows a
+person who chooses the local provider. Use a reviewed revision on `main` or
+one explicitly approved for evaluation. The scripts need the repository's
+pinned dependencies and a free loopback port. The model runs separately, in
+an approved, budgeted conversation with tools disabled. Only public skill
+text and a synthetic project scenario go to the model. Ordinary CI uses
+handwritten responses to test the grader and incurs no model charges.
+
+1. Run `node scripts/eval-start-project.ts prompt` and send its output to a
+   fresh model conversation. Save the model's exact JSON response to
+   `plan.json` outside the checkout.
+2. Read the plan. Record whether it asked for a choice before acting, gave the
+   available paths, and attributed its recommendation once. If the plan would
+   need correction, record a failed run. Otherwise run
+   `node scripts/eval-start-project.ts choose /path/to/plan.json` and send the
+   printed approval and file-block menu in the same conversation. Save the
+   exact JSON reply to `implementation.json` alongside the first response.
+3. Run `node scripts/eval-start-project.ts grade /path/to/plan.json /path/to/implementation.json`.
+   The grader requires zero file edits in the plan, writes the reviewed
+   skill blocks the model selected into a fresh project, and uses the pinned
+   packages and a disposable local provider to sign in and out. The fixture
+   supplies its own private settings. A failed replay exits nonzero.
+4. Verify the second reply follows the local choice without renewing the
+   hosted recommendation or asking for a secret in chat. Record the reviewed
+   commit, model/version, date, both conversational verdicts and the grader's
+   result. Keep the two replies locally for review. A passing fixture alone
+   proves only the selected project works.
+
+This case covers the local new-project path. The existing-project and
+migration skills have deterministic fixture replays. A funded model run and
+their conversational evaluations are still open.
 
 The build is deterministic: the same sources give the same bytes. Archives are
 written with sorted entries, zero timestamps and fixed ownership.
