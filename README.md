@@ -467,9 +467,38 @@ handwritten responses to test the grader and incurs no model charges.
    result. Keep the two replies locally for review. A passing fixture alone
    proves only the selected project works.
 
-This case covers the local new-project path. The existing-project and
-migration skills have deterministic fixture replays. A funded model run and
-their conversational evaluations are still open.
+### Evaluate the existing-project and outward-migration pilots
+
+Both pilots use the same reviewed revision, tools-disabled conversation and
+two-turn review procedure above. Start a fresh conversation for each case.
+The scenario supplies public project details and synthetic account labels.
+For either case run these commands, substituting `existing` or `migration`
+for `CASE` and keeping each conversation's replies in its own directory:
+
+```sh
+node scripts/eval-pilot.ts CASE prompt
+node scripts/eval-pilot.ts CASE choose /path/to/plan.json
+node scripts/eval-pilot.ts CASE grade /path/to/plan.json /path/to/implementation.json
+```
+
+- **Existing project.** Check that the model inventories the existing issuer,
+  routes and session, proposes Phase A and waits. The person approves a pilot
+  with the existing issuer. The model selects the pilot mount. The fixture
+  exercises the existing sign-in and support session, signs in to the pilot,
+  checks access to the user's organization and denial for another, then logs
+  out of the pilot. Review the model's reply for a separate approval before
+  changing providers or moving users.
+- **Outward migration.** Check that the model follows the chosen destination,
+  plans a bounded cohort with rollback and reconciliation, and leaves keys
+  and export files with the operator. After approval the model selects the
+  cohort. The fixture decrypts paired synthetic exports, checks the selections
+  against the mapped accounts, refuses disabled and deleted accounts, and
+  signs in with a portable credential and then its upgraded native credential.
+  Review the model's reply for limits on production cutover.
+
+Record both human verdicts and the fixture result for each case. The local
+tests exercise all three graders with handwritten replies. Actual model runs
+still need an approved model and budget.
 
 The build is deterministic: the same sources give the same bytes. Archives are
 written with sorted entries, zero timestamps and fixed ownership.
